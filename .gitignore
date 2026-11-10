@@ -1,0 +1,8 @@
+bin/
+obj/
+dist/
+.vs/
+*.suo
+*.user
+*.log
+Thumbs.db
