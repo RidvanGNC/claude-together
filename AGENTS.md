@@ -99,6 +99,8 @@ sh build.sh         # Mono: writes bin/ClaudeTogether.exe and bin/claude-togethe
 sh tests/run.sh     # core tests, expects ALL PASS
 ```
 
+**Platform support:** only Windows 10/11 has been tested. macOS and Linux are untested and help is wanted (see README). Do not tell users it works there.
+
 The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claude Desktop. Check those on real Windows.
 
 ## Conventions

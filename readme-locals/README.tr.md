@@ -113,12 +113,22 @@ claude-together run work -- claude      :: bu terminalde "work" hesabıyla Claud
 
 ## Sınırlamalar
 
-- Yalnızca Windows 10/11. Claude Masaüstü uygulaması gerekir.
+- Yalnızca Windows 10/11. Claude Masaüstü uygulaması gerekir. macOS ve Linux denenmedi (aşağıya bakın: [macOS ve Linux](#macos-ve-linux-denenmedi-destek-bekliyoruz)).
 - Tüm Claude pencereleri görev çubuğunda aynı ad ve simgeyle görünür.
 - Cowork'ün sanal makinesi aynı anda tek pencerede çalışır.
 - Giriş için tarayıcıda claude.ai, eklediğiniz hesapla açık olmalıdır. "Yanlış hesap" sorununun olağan nedeni, tarayıcıda önce başka hesaba giriş yapmış olmaktır.
 - Giriş yaparken ya da oturum yenilerken tüm Claude Masaüstü pencereleri kısa süre kapanır.
 - Resmî değildir. Anthropic ile bağlantılı değildir ve onun onayını taşımaz; "Claude" Anthropic'in ticari markasıdır. Birden fazla hesap kullanımı hesaplarınız için geçerli koşullara uymalıdır. Bu sizin sorumluluğunuzdadır.
+
+## macOS ve Linux: denenmedi, destek bekliyoruz
+
+Claude Together yalnızca Windows 10/11 üzerinde yazıldı ve denendi. macOS'ta ya da herhangi bir Linux kabuğunda **denemedik**; bu alanda destek arıyoruz.
+
+- Windows'a özgü parçalar (WMI ile süreç tespiti, `mklink` bağlantıları, robocopy, Appx sorgusu, `install` adımı) bu sistemlerde olduğu gibi çalışmaz.
+- Temel fikirler (`CLAUDE_CONFIG_DIR`, `--user-data-dir`, giriş istasyonu) taşınabilir, yani bir port mümkün görünüyor. macOS'ta kimlik bilgisi saklama farklıdır; bunun ayrıca kontrol edilmesi gerekir.
+- Derleme ve çekirdek testler Linux'ta Mono ile çalışır, ama yalnızca dosya mantığını sahte bir kabukla sınar. Uygulamanın kendisi orada çalıştırılmadı.
+
+macOS ya da Linux kullanıyorsanız denemenize ve gördüklerinizi bir issue olarak yazmanıza, ya da pull request göndermenize bekleriz. Her port için aynı kullanım amacı geçerlidir: kişisel bilgisayarlar, insan girdisi, otomasyon yok.
 
 ## Gizlilik
 

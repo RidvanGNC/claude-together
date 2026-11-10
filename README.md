@@ -111,12 +111,22 @@ Exit codes: `0` ok · `1` error · `2` usage error · `3` action needed (for exa
 
 ## Limitations
 
-- Windows 10/11 only. Needs the Claude Desktop app.
+- Windows 10/11 only. Needs the Claude Desktop app. macOS and Linux are untested (see [below](#macos-and-linux-untested-help-wanted)).
 - All Claude windows share one name and icon in the taskbar.
 - Cowork's virtual machine runs for one window at a time.
 - Signing in needs the browser to be signed in to claude.ai with the account you are adding. Signing in to another account in the browser first is the usual cause of "wrong account".
 - Signing in or refreshing a session closes all Claude Desktop windows for a moment.
 - Unofficial. Not affiliated with or endorsed by Anthropic; "Claude" is a trademark of Anthropic. Using several accounts must follow the terms that apply to your accounts. That is your responsibility.
+
+## macOS and Linux: untested, help wanted
+
+Claude Together has only been written and tried on Windows 10/11. I have **not** tested it on macOS or any Linux shell, and I am looking for people who can help there.
+
+- The Windows-specific parts (WMI process detection, `mklink` junctions, robocopy, the Appx lookup, the `install` step) will not work on those systems as they are.
+- The core ideas (`CLAUDE_CONFIG_DIR`, `--user-data-dir`, the login station) may carry over, so a port looks possible. Credential storage differs on macOS, which needs checking.
+- The build and the core tests run under Mono on Linux, but they only cover file logic with a stubbed shell. The app itself has not been run there.
+
+If you use macOS or Linux and want to help, please try it and open an issue with what you saw, or send a pull request. The same intended use applies to any port: personal computers, human input, no automation.
 
 ## Privacy
 
