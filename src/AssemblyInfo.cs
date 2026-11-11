@@ -6,5 +6,6 @@ using System.Reflection;
 [assembly: AssemblyCompany("Rıdvan Gonca")]
 [assembly: AssemblyProduct("Claude Together")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Rıdvan Gonca")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+// The version is set once, in Cli.Version.
+[assembly: AssemblyVersion(ClaudeTogether.Cli.Version + ".0")]
+[assembly: AssemblyFileVersion(ClaudeTogether.Cli.Version + ".0")]

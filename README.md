@@ -218,7 +218,7 @@ wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 ^
   -o dist\ClaudeTogether-1.1.0.msi
 ```
 
-To publish a release: set the same version in `src/Cli.cs` (`Version`) and `src/AssemblyInfo.cs`, commit, then push a tag such as `v1.1.0`. The workflow checks that the tag matches the version, then creates the GitHub Release with the MSI, the portable zip and checksums.
+To publish a release: raise `Version` in `src/Cli.cs` (the only place the version is written; the executables and the MSI take it from there), commit and push to `main`. When the build is green and no tag `v<version>` exists yet, the workflow creates that tag on the tested commit and the GitHub Release with the MSI, the portable zip and checksums. Pushes that keep the same version publish nothing. Pushing a tag by hand still works; the workflow checks that it matches the version.
 
 ## Contributing
 

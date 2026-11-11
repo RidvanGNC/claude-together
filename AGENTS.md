@@ -104,7 +104,7 @@ src/Program.cs        entry: GUI, or CLI when built with -define:CLI
 src/Cli.cs            command parsing and output
 src/Installer.cs      'install' / 'uninstall' for the portable zip: PATH, Start Menu shortcut
 installer/            MSI source (WiX v5, per-user, no admin) and license.rtf
-.github/workflows/    build.yml: Mono tests, Windows build, MSI install/uninstall test, release on tag
+.github/workflows/    build.yml: Mono tests, Windows build, MSI install/uninstall test, tag and release on a new version
 src/Localization.cs   Loc.T(en, args) with a Turkish table
 src/Core/             paths, config, files, profiles, desktop process handling,
                       Core.Agents.cs (scan, whoami, delegate, skill), AgentKit.cs (skill text)
@@ -127,7 +127,7 @@ sh tests/run.sh     # core tests, expects ALL PASS
 
 **Platform support:** only Windows 10/11 has been tested. macOS and Linux are untested and help is wanted (see README). Do not tell users it works there.
 
-**Installer and releases:** `installer/ClaudeTogether.wxs` builds a per-user MSI (WiX v5, no admin rights, installs to `%LOCALAPPDATA%\Programs\ClaudeTogether`). `.github/workflows/build.yml` builds, tests, installs and uninstalls it on a Windows runner, and publishes a release when a `v<version>` tag is pushed. The portable zip has `claude-together install` / `uninstall` (`src/Installer.cs`) for the same per-user folder, PATH entry and shortcut; both refuse to run when the MSI is installed, so the two never fight over the same files. Release steps: set the same version in `src/Cli.cs` (`Version`) and `src/AssemblyInfo.cs`, commit, tag `v<version>`, push the tag.
+**Installer and releases:** `installer/ClaudeTogether.wxs` builds a per-user MSI (WiX v5, no admin rights, installs to `%LOCALAPPDATA%\Programs\ClaudeTogether`). `.github/workflows/build.yml` builds, tests, installs and uninstalls it on a Windows runner, and publishes a release when a `v<version>` tag is pushed. The portable zip has `claude-together install` / `uninstall` (`src/Installer.cs`) for the same per-user folder, PATH entry and shortcut; both refuse to run when the MSI is installed, so the two never fight over the same files. Release steps: raise `Version` in `src/Cli.cs` (the only place; `AssemblyInfo.cs` and the MSI take it from there), commit, push to `main`. The workflow creates the tag `v<version>` and the release itself when that version has no tag yet. Do not tag by hand, and do not raise the version unless the user asked for a release: a pushed new version is published at once.
 
 The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claude Desktop. Check those on real Windows.
 

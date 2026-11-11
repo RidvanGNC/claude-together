@@ -220,7 +220,7 @@ wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 ^
   -o dist\ClaudeTogether-1.1.0.msi
 ```
 
-Sürüm yayınlamak için aynı sürümü `src/Cli.cs` (`Version`) ve `src/AssemblyInfo.cs` içinde ayarlayın, commit'leyin, sonra `v1.1.0` gibi bir etiket gönderin. İş akışı etiketin sürümle eşleştiğini denetler, sonra MSI, taşınabilir zip ve sağlama toplamlarıyla GitHub Release oluşturur.
+Sürüm yayınlamak için `src/Cli.cs` içindeki `Version` değerini artırın (sürüm yalnızca burada yazılır; exe'ler ve MSI sürümü buradan alır), commit'leyip `main`'e gönderin. Derleme yeşil olduğunda ve `v<sürüm>` etiketi henüz yoksa iş akışı bu etiketi test edilen commit üzerinde, ardından MSI, taşınabilir zip ve sağlama toplamlarıyla GitHub Release'i kendisi oluşturur. Sürümü değişmeyen push'lar bir şey yayınlamaz. Etiketi elle göndermek de çalışır; iş akışı etiketin sürümle eşleştiğini denetler.
 
 ## Katkı
 

@@ -1,6 +1,9 @@
 # Builds, tests and packages Claude Together.
 #   push / pull request : build both exes, run the core tests, build and smoke-test the MSI
-#   tag v<version>      : the same, then publish a GitHub Release with the MSI
+#   push to main with a version that has no tag yet:
+#                         the same, then create the tag v<version> and a GitHub Release with the MSI
+#   tag v<version>      : the same, then publish a GitHub Release (manual tag; it must match the version)
+# The version is written once, in src/Cli.cs (Cli.Version). Nothing else needs editing to release.
 name: build
 
 on:
@@ -40,23 +43,42 @@ jobs:
         shell: pwsh
     outputs:
       version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.version.outputs.release }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Read and check the version
+      - name: Read the version and decide whether to release
         id: version
         run: |
           $ver = (Select-String -Path src\Cli.cs -Pattern 'Version = "(\d+\.\d+\.\d+)"').Matches[0].Groups[1].Value
-          $asm = (Select-String -Path src\AssemblyInfo.cs -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)\.0"\)').Matches[0].Groups[1].Value
-          if ($ver -ne $asm) { throw "Version mismatch: Cli.cs has $ver, AssemblyInfo.cs has $asm" }
-          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ver") { throw "Tag $env:GITHUB_REF_NAME does not match version $ver" }
+          $tag = "v$ver"
+          $release = 'false'
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            if ($env:GITHUB_REF_NAME -ne $tag) { throw "Tag $env:GITHUB_REF_NAME does not match version $ver" }
+            $release = 'true'
+          } elseif ($env:GITHUB_EVENT_NAME -eq 'push' -and $env:GITHUB_REF -eq 'refs/heads/main') {
+            # A version without a tag yet is a new release. 'ls-remote --exit-code' exits 2 when no ref matches.
+            git ls-remote --exit-code --tags origin "refs/tags/$tag" | Out-Null
+            if ($LASTEXITCODE -eq 2) { $release = 'true' }
+            elseif ($LASTEXITCODE -ne 0) { throw "Could not look up the tag $tag" }
+            $global:LASTEXITCODE = 0
+          }
           "version=$ver" >> $env:GITHUB_OUTPUT
+          "release=$release" >> $env:GITHUB_OUTPUT
           "VERSION=$ver" >> $env:GITHUB_ENV
-          Write-Host "Version $ver"
+          Write-Host "Version $ver, release: $release"
 
       - name: Build both executables
         shell: cmd
         run: build.cmd
+
+      - name: Check the version inside the executables
+        run: |
+          foreach ($f in 'ClaudeTogether.exe', 'claude-together.exe') {
+            $v = (Get-Item "bin\$f").VersionInfo.FileVersion
+            if ($v -ne "$env:VERSION.0") { throw "$f has file version $v, expected $env:VERSION.0" }
+          }
+          Write-Host "Both executables report $env:VERSION"
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -74,7 +96,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           wix build installer\ClaudeTogether.wxs `
-            -ext WixToolset.UI.wixext -arch x64 `
+            -ext WixToolset.UI.wixext -arch x64 -pdbtype none `
             -d Version=$env:VERSION -d BinDir=bin -d IconFile=assets\app.ico `
             -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE `
             -o "dist\ClaudeTogether-$env:VERSION.msi"
@@ -234,7 +256,8 @@ jobs:
     name: Publish release
     runs-on: ubuntu-latest
     needs: windows
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.windows.outputs.release == 'true'
+    concurrency: release
     permissions:
       contents: write
     steps:
@@ -242,11 +265,19 @@ jobs:
         with:
           name: claude-together-${{ needs.windows.outputs.version }}
           path: dist
-      - name: Create the release
+      - name: Create the tag and the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.windows.outputs.version }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          tag="v$VERSION"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "$tag is already released; nothing to do."
+            exit 0
+          fi
+          # For a version without a tag, this creates the tag on the tested commit.
+          gh release create "$tag" dist/* \
             --repo "$GITHUB_REPOSITORY" \
-            --title "Claude Together ${{ needs.windows.outputs.version }}" \
+            --target "$GITHUB_SHA" \
+            --title "Claude Together $VERSION" \
             --generate-notes
