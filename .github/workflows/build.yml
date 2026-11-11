@@ -161,6 +161,8 @@ jobs:
             $out = & bin\claude-together.exe $cmd 2>&1 | Out-String
             if ($LASTEXITCODE -ne 1 -or $out -notmatch 'MSI') { throw "'$cmd' did not step aside for the MSI (exit $LASTEXITCODE): $out" }
           }
+          # The step ends with the exit code of the last native command; the expected 1 above must not fail it.
+          $global:LASTEXITCODE = 0
           Write-Host "CLI smoke test passed"
 
       - name: Smoke test the installed app window
