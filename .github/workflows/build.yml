@@ -111,8 +111,9 @@ jobs:
           foreach ($f in 'ClaudeTogether.exe', 'claude-together.exe', 'LICENSE.txt') {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "Missing after install: $f" }
           }
-          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-          if (($userPath -split ';') -notcontains $dir) { throw "User PATH does not contain $dir" }
+          # Windows Installer writes the folder with a trailing backslash.
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | ForEach-Object { $_.TrimEnd('\') }
+          if ($userPath -notcontains $dir) { throw "User PATH does not contain $dir" }
           $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Together.lnk'
           if (-not (Test-Path $lnk)) { throw "Start Menu shortcut missing: $lnk" }
           Write-Host "Installed to $dir"
@@ -152,6 +153,12 @@ jobs:
           foreach ($want in 'hello there', 'acct=personal depth=1', 'args=-p --max-turns 2') {
             if ($res.output -notmatch [regex]::Escape($want)) { throw "delegate output lacks '$want': $($res.output)" }
           }
+
+          # 'install' and 'uninstall' are for the portable zip and must leave an MSI install alone
+          foreach ($cmd in 'install', 'uninstall') {
+            $out = & bin\claude-together.exe $cmd 2>&1 | Out-String
+            if ($LASTEXITCODE -ne 1 -or $out -notmatch 'MSI') { throw "'$cmd' did not step aside for the MSI (exit $LASTEXITCODE): $out" }
+          }
           Write-Host "CLI smoke test passed"
 
       - name: Smoke test the installed app window
@@ -170,9 +177,41 @@ jobs:
           if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\uninstall.log" -Tail 60; throw "Uninstall failed with exit code $($p.ExitCode)" }
           $dir = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether'
           if (Test-Path $dir) { throw "Install folder is still there after uninstall: $dir" }
-          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir) { throw "PATH entry was not removed" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | ForEach-Object { $_.TrimEnd('\') }
+          if ($userPath -contains $dir) { throw "PATH entry was not removed" }
           if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude-work'))) { throw "Uninstall must not touch account data" }
           Write-Host "Uninstalled cleanly; account data untouched"
+
+      - name: Test install and uninstall without the MSI
+        run: |
+          $env:CLAUDE_TOGETHER_LANG = 'en'
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether'
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Together.lnk'
+          function Test-UserPath { ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | ForEach-Object { $_.TrimEnd('\') }) -contains $dir }
+          # The raw registry value, without empty entries: %VAR% entries must come back unexpanded.
+          function Get-RawUserPath { @((Get-Item 'HKCU:\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames') -split ';' | Where-Object { $_ }) -join ';' }
+          $before = Get-RawUserPath
+
+          & bin\claude-together.exe install
+          if ($LASTEXITCODE -ne 0) { throw "install exited $LASTEXITCODE" }
+          foreach ($f in 'ClaudeTogether.exe', 'claude-together.exe') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "Missing after install: $f" }
+          }
+          if (-not (Test-UserPath)) { throw "User PATH does not contain $dir" }
+          if (-not (Test-Path $lnk)) { throw "Start Menu shortcut missing: $lnk" }
+
+          & (Join-Path $dir 'claude-together.exe') install      # a second run changes nothing
+          if ($LASTEXITCODE -ne 0) { throw "second install exited $LASTEXITCODE" }
+          if (@([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_.TrimEnd('\') -eq $dir }).Count -ne 1) { throw "PATH entry was added twice" }
+
+          & (Join-Path $dir 'claude-together.exe') uninstall
+          if ($LASTEXITCODE -ne 0) { throw "uninstall exited $LASTEXITCODE" }
+          if (Test-UserPath) { throw "PATH entry was not removed" }
+          if (Test-Path $lnk) { throw "Start Menu shortcut was not removed" }
+          $after = Get-RawUserPath
+          if ($after -ne $before) { throw "User PATH changed: '$before' -> '$after'" }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude-work'))) { throw "Uninstall must not touch account data" }
+          Write-Host "Portable install and uninstall work; PATH restored"
 
       - name: Collect release files
         run: |

@@ -49,7 +49,7 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 
 Kurulum yönetici hakkı istemez. Kurulumu çalıştıran Windows kullanıcısı için `%LOCALAPPDATA%\Programs\ClaudeTogether` klasörüne kurulur, bu klasörü kullanıcı `PATH`'inize ekler ve Başlat menüsüne kısayol koyar. Güncellemek için yeni MSI'yı çalıştırın. Kaldırmak için **Ayarlar → Uygulamalar**'ı kullanın; hesaplarınıza ve Claude verilerinize dokunulmaz. Sessiz kurulum: `msiexec /i ClaudeTogether-<sürüm>.msi /qn`.
 
-Kurulum istemiyorsanız her sürümde iki `.exe` dosyasını içeren bir `-portable.zip` de var. Sağlama toplamları `SHA256SUMS.txt` dosyasındadır.
+Kurulum istemiyorsanız her sürümde iki `.exe` dosyasını içeren bir `-portable.zip` de var. Dosyalar herhangi bir klasörden çalışır. İsterseniz bir kez `claude-together install` çalıştırın: iki dosyayı `%LOCALAPPDATA%\Programs\ClaudeTogether` klasörüne kopyalar, bu klasörü kullanıcı `PATH`'inize ekler ve Başlat menüsüne kısayol koyar; bunun için de yönetici hakkı gerekmez. `claude-together uninstall`, `PATH` kaydını ve kısayolu kaldırır. MSI kuruluysa iki komut da hiçbir şeye dokunmaz. Sağlama toplamları `SHA256SUMS.txt` dosyasındadır.
 
 ## Hızlı başlangıç (arayüz)
 
@@ -90,6 +90,7 @@ claude-together run work -- claude      :: bu terminalde "work" hesabıyla Claud
 | `skill install\|remove` | Ajan skill'ini ortak skill klasörüne ekler ya da kaldırır |
 | `backup` | Mevcut Claude verisini yedek klasörlere kopyalar |
 | `recover` | Yarım kalan girişin kenara aldığı veriyi geri koyar |
+| `install` / `uninstall` | MSI olmadan kullanıcı bazlı kurulum: `PATH` kaydı ve Başlat menüsü kısayolu |
 | `version`, `help` | |
 
 | Seçenek | Anlamı |
@@ -195,7 +196,7 @@ build.cmd
 Aynı kaynaklardan `bin\ClaudeTogether.exe` (pencereli) ve `bin\claude-together.exe` (konsol) üretilir. Linux ya da macOS'ta Mono ile `sh build.sh` aynı dosyaları derler, `sh tests/run.sh` çekirdek testlerini çalıştırır.
 
 ```
-src/        Program.cs, Cli.cs, Localization.cs
+src/        Program.cs, Cli.cs, Installer.cs, Localization.cs
 src/Core/   yollar, yapılandırma, yedek, paylaşım, süreç, giriş ve ajan modu mantığı (arayüzsüz)
 src/Ui/     WinForms ekranları ve denetimleri
 tests/      çekirdek testleri (Mono)
@@ -208,7 +209,7 @@ assets/     uygulama simgesi
 
 ### Kurucu ve sürümler
 
-MSI, `installer/ClaudeTogether.wxs` dosyasından [WiX](https://wixtoolset.org) v5 ile, kullanıcı bazlı bir paket olarak üretilir. Her push'ta [iş akışı](../.github/workflows/build.yml) iki exe'yi derler, çekirdek testleri çalıştırır, MSI'yı üretir, kurar, kurulu CLI ve uygulamayı duman testinden geçirir, kaldırır ve dosyaları derleme çıktısı olarak yükler. MSI'yı kendiniz üretmek için (.NET SDK gerekir):
+MSI, `installer/ClaudeTogether.wxs` dosyasından [WiX](https://wixtoolset.org) v5 ile, kullanıcı bazlı bir paket olarak üretilir. Her push'ta [iş akışı](../.github/workflows/build.yml) iki exe'yi derler, çekirdek testleri çalıştırır, MSI'yı üretir, kurar, kurulu CLI ve uygulamayı duman testinden geçirir, kaldırır, taşınabilir dosyalarla `install` ve `uninstall` komutlarını sınar ve dosyaları derleme çıktısı olarak yükler. MSI'yı kendiniz üretmek için (.NET SDK gerekir):
 
 ```bat
 dotnet tool install --global wix --version 5.0.2

@@ -13,9 +13,6 @@ namespace ClaudeTogether
     {
         public const string Version = "1.1.0";
 
-        const string CliExe = "claude-together.exe";
-        const string GuiExe = "ClaudeTogether.exe";
-
         const int ExitOk = 0;
         const int ExitError = 1;
         const int ExitUsage = 2;
@@ -47,6 +44,9 @@ Commands
   skill install|remove         Add or remove the agent skill in the shared skills folder
   backup                       Copy current Claude data to backup folders; changes nothing else
   recover                      Restore data parked by an interrupted login
+  install                      Without the MSI: copy both files to %LOCALAPPDATA%\Programs\ClaudeTogether,
+                               add that folder to PATH and add a Start Menu shortcut
+  uninstall                    Undo 'install': remove the PATH entry and the shortcut
   version, help
 
 Options
@@ -150,6 +150,8 @@ Examples
                     case "skill": return SkillCommand(a);
                     case "backup": return BackupCommand(a);
                     case "recover": return Recover();
+                    case "install": Installer.Install(Console.WriteLine); return ExitOk;
+                    case "uninstall": Installer.Uninstall(Console.WriteLine); return ExitOk;
                     default: throw new UsageException("Unknown command: " + a.Command + ". Run 'claude-together help'.", ExitUsage);
                 }
             }
@@ -213,8 +215,8 @@ Examples
 
         static int OpenUi()
         {
-            string gui = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, GuiExe);
-            if (!File.Exists(gui)) throw new InvalidOperationException(GuiExe + " was not found next to " + CliExe + ".");
+            string gui = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Installer.GuiExe);
+            if (!File.Exists(gui)) throw new InvalidOperationException(Installer.GuiExe + " was not found next to " + Installer.CliExe + ".");
             Process.Start(gui);
             return ExitOk;
         }

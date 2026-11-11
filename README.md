@@ -49,7 +49,7 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 
 The installer needs no administrator rights. It installs for the Windows user who runs it, into `%LOCALAPPDATA%\Programs\ClaudeTogether`, adds that folder to your user `PATH` and adds a Start Menu shortcut. Update by running a newer MSI. Uninstall in **Settings → Apps**; your accounts and Claude data are never touched. For a silent install: `msiexec /i ClaudeTogether-<version>.msi /qn`.
 
-Prefer no installer? Each release also has a `-portable.zip` with the two `.exe` files. A [SHA256SUMS.txt](../../releases) file lists checksums.
+Prefer no installer? Each release also has a `-portable.zip` with the two `.exe` files. They run from any folder. Optionally run `claude-together install` once: it copies both files to `%LOCALAPPDATA%\Programs\ClaudeTogether`, adds that folder to your user `PATH` and adds a Start Menu shortcut, also without admin rights. `claude-together uninstall` removes the `PATH` entry and the shortcut. Both commands step aside when the MSI is installed. A [SHA256SUMS.txt](../../releases) file lists checksums.
 
 ## Quick start (GUI)
 
@@ -90,6 +90,7 @@ claude-together run work -- claude      :: Claude Code in this terminal with the
 | `skill install\|remove` | Add or remove the agent skill in the shared skills folder |
 | `backup` | Copy current Claude data to backup folders |
 | `recover` | Restore data parked by an interrupted login |
+| `install` / `uninstall` | Per-user install without the MSI: `PATH` entry and Start Menu shortcut |
 | `version`, `help` | |
 
 | Option | Meaning |
@@ -193,7 +194,7 @@ build.cmd
 This creates `bin\ClaudeTogether.exe` (windowed) and `bin\claude-together.exe` (console) from the same sources. On Linux or macOS with Mono, `sh build.sh` builds the same files, and `sh tests/run.sh` runs the core tests.
 
 ```
-src/        Program.cs, Cli.cs, Localization.cs
+src/        Program.cs, Cli.cs, Installer.cs, Localization.cs
 src/Core/   paths, config, backup, sharing, process, sign-in and agent-mode logic (no UI)
 src/Ui/     WinForms screens and controls
 tests/      core tests (Mono)
@@ -206,7 +207,7 @@ Translations live in `src/Localization.cs`: English text is the key, Turkish the
 
 ### Installer and releases
 
-The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTogether.wxs`, as a per-user package. On every push, the [workflow](.github/workflows/build.yml) builds both executables, runs the core tests, builds the MSI, installs it, smoke-tests the installed CLI and app, uninstalls it and uploads the files as build artifacts. To build the MSI yourself (needs the .NET SDK):
+The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTogether.wxs`, as a per-user package. On every push, the [workflow](.github/workflows/build.yml) builds both executables, runs the core tests, builds the MSI, installs it, smoke-tests the installed CLI and app, uninstalls it, tests `install` and `uninstall` from the portable files and uploads the files as build artifacts. To build the MSI yourself (needs the .NET SDK):
 
 ```bat
 dotnet tool install --global wix --version 5.0.2

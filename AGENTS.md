@@ -17,7 +17,7 @@ As an agent you must:
 - Work only with accounts that belong to the user, on the user's computer.
 - **Never** help set up account sharing, resale or access for other people.
 - **Never** add network code, telemetry or remote control to this project.
-- Run state-changing commands (`setup`, `login`, `open`, `close`, `skill install`) only when the user asked for them in this conversation.
+- Run state-changing commands (`setup`, `login`, `open`, `close`, `skill install`, `install`, `uninstall`) only when the user asked for them in this conversation.
 - Use `delegate` when the user's task calls for handing work to another of their accounts (see below). Do not loop on usage-limit errors; report them to the user.
 
 Read-only commands (`list`, `scan`, `whoami`, `env`, `version`, `help`) are fine to use to answer questions.
@@ -40,6 +40,7 @@ Windows only. Commands are written for `cmd`/PowerShell.
 | Hand a task to another account | `claude-together delegate <name> --prompt-file brief.md --cwd <dir> --json` |
 | Let every account's agent know about this | `claude-together skill install` / `remove` |
 | Back up or recover | `claude-together backup` / `recover` |
+| Install the portable files without the MSI | `claude-together install` / `uninstall` (PATH and Start Menu shortcut) |
 
 Options: `-y/--yes` skip prompts, `--json`, `--all`, `--shell`, `--lang en|tr`. `delegate` also takes `--prompt`, `--prompt-file` (`-` reads stdin), `--cwd`, `--max-turns`, `--timeout`, `--allow-edits`, and extra Claude Code options after `--`.
 Set `CLAUDE_TOGETHER_LANG=en` for stable English output.
@@ -101,6 +102,7 @@ To split the user's own work across their accounts, use `delegate`. Never use an
 ```
 src/Program.cs        entry: GUI, or CLI when built with -define:CLI
 src/Cli.cs            command parsing and output
+src/Installer.cs      'install' / 'uninstall' for the portable zip: PATH, Start Menu shortcut
 installer/            MSI source (WiX v5, per-user, no admin) and license.rtf
 .github/workflows/    build.yml: Mono tests, Windows build, MSI install/uninstall test, release on tag
 src/Localization.cs   Loc.T(en, args) with a Turkish table
@@ -125,7 +127,7 @@ sh tests/run.sh     # core tests, expects ALL PASS
 
 **Platform support:** only Windows 10/11 has been tested. macOS and Linux are untested and help is wanted (see README). Do not tell users it works there.
 
-**Installer and releases:** `installer/ClaudeTogether.wxs` builds a per-user MSI (WiX v5, no admin rights, installs to `%LOCALAPPDATA%\Programs\ClaudeTogether`). `.github/workflows/build.yml` builds, tests, installs and uninstalls it on a Windows runner, and publishes a release when a `v<version>` tag is pushed. Release steps: set the same version in `src/Cli.cs` (`Version`) and `src/AssemblyInfo.cs`, commit, tag `v<version>`, push the tag.
+**Installer and releases:** `installer/ClaudeTogether.wxs` builds a per-user MSI (WiX v5, no admin rights, installs to `%LOCALAPPDATA%\Programs\ClaudeTogether`). `.github/workflows/build.yml` builds, tests, installs and uninstalls it on a Windows runner, and publishes a release when a `v<version>` tag is pushed. The portable zip has `claude-together install` / `uninstall` (`src/Installer.cs`) for the same per-user folder, PATH entry and shortcut; both refuse to run when the MSI is installed, so the two never fight over the same files. Release steps: set the same version in `src/Cli.cs` (`Version`) and `src/AssemblyInfo.cs`, commit, tag `v<version>`, push the tag.
 
 The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claude Desktop. Check those on real Windows.
 
