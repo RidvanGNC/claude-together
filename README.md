@@ -213,7 +213,7 @@ The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTog
 dotnet tool install --global wix --version 5.0.2
 wix extension add --global WixToolset.UI.wixext/5.0.2
 build.cmd
-wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 -sice ICE38 -sice ICE64 -sice ICE91 ^
+wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 ^
   -d Version=1.1.0 -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
   -o dist\ClaudeTogether-1.1.0.msi
 ```

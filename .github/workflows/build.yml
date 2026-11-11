@@ -75,11 +75,13 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           wix build installer\ClaudeTogether.wxs `
             -ext WixToolset.UI.wixext -arch x64 `
-            -sice ICE38 -sice ICE64 -sice ICE91 `
             -d Version=$env:VERSION -d BinDir=bin -d IconFile=assets\app.ico `
             -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE `
             -o "dist\ClaudeTogether-$env:VERSION.msi"
           if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+          # 'wix build' does not validate; ICE91 only says per-user files stay per-user, which is intended.
+          wix msi validate -sice ICE91 "dist\ClaudeTogether-$env:VERSION.msi"
+          if ($LASTEXITCODE -ne 0) { throw "MSI validation failed" }
 
       - name: Check that the MSI needs no administrator rights
         run: |
