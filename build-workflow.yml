@@ -1,0 +1,209 @@
+# Builds, tests and packages Claude Together.
+#   push / pull request : build both exes, run the core tests, build and smoke-test the MSI
+#   tag v<version>      : the same, then publish a GitHub Release with the MSI
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  WIX_VERSION: 5.0.2
+
+jobs:
+  test:
+    name: Core tests (Linux, Mono)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Mono
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mono-complete
+      - name: Build both executables
+        run: sh build.sh
+      - name: Run core tests
+        run: sh tests/run.sh
+
+  windows:
+    name: Build, package and test (Windows)
+    runs-on: windows-latest
+    needs: test
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read and check the version
+        id: version
+        run: |
+          $ver = (Select-String -Path src\Cli.cs -Pattern 'Version = "(\d+\.\d+\.\d+)"').Matches[0].Groups[1].Value
+          $asm = (Select-String -Path src\AssemblyInfo.cs -Pattern 'AssemblyVersion\("(\d+\.\d+\.\d+)\.0"\)').Matches[0].Groups[1].Value
+          if ($ver -ne $asm) { throw "Version mismatch: Cli.cs has $ver, AssemblyInfo.cs has $asm" }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$ver") { throw "Tag $env:GITHUB_REF_NAME does not match version $ver" }
+          "version=$ver" >> $env:GITHUB_OUTPUT
+          "VERSION=$ver" >> $env:GITHUB_ENV
+          Write-Host "Version $ver"
+
+      - name: Build both executables
+        shell: cmd
+        run: build.cmd
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install WiX
+        run: |
+          dotnet tool install --global wix --version $env:WIX_VERSION
+          "$env:USERPROFILE\.dotnet\tools" >> $env:GITHUB_PATH
+          $env:PATH += ";$env:USERPROFILE\.dotnet\tools"
+          wix extension add --global "WixToolset.UI.wixext/$env:WIX_VERSION"
+          if ($LASTEXITCODE -ne 0) { throw "Could not add the WiX UI extension" }
+
+      - name: Build the MSI
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          wix build installer\ClaudeTogether.wxs `
+            -ext WixToolset.UI.wixext -arch x64 `
+            -sice ICE38 -sice ICE64 -sice ICE91 `
+            -d Version=$env:VERSION -d BinDir=bin -d IconFile=assets\app.ico `
+            -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE `
+            -o "dist\ClaudeTogether-$env:VERSION.msi"
+          if ($LASTEXITCODE -ne 0) { throw "wix build failed" }
+
+      - name: Check that the MSI needs no administrator rights
+        run: |
+          $msi = (Resolve-Path "dist\ClaudeTogether-$env:VERSION.msi").Path
+          function Get-Com($o, $name, $comArgs) { $o.GetType().InvokeMember($name, 'GetProperty', $null, $o, $comArgs) }
+          function Invoke-Com($o, $name, $comArgs) { $o.GetType().InvokeMember($name, 'InvokeMethod', $null, $o, $comArgs) }
+          try {
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            $db = Invoke-Com $installer 'OpenDatabase' @($msi, 0)
+            # Summary property 15 (word count): bit 8 means "no elevated privileges needed".
+            $words = [int](Get-Com (Get-Com $db 'SummaryInformation' @(0)) 'Property' @(15))
+            $view = Invoke-Com $db 'OpenView' @("SELECT Value FROM Property WHERE Property = 'ALLUSERS'")
+            Invoke-Com $view 'Execute' $null | Out-Null
+            $allUsers = Invoke-Com $view 'Fetch' $null
+          } catch {
+            Write-Warning "Could not read the MSI tables ($($_.Exception.Message)); relying on the install test below."
+            return
+          }
+          if (($words -band 8) -eq 0) { throw "The MSI asks for elevation (word count $words)" }
+          if ($allUsers -ne $null) { throw "The MSI sets ALLUSERS, so it would install per machine" }
+          Write-Host "OK: per-user package, no elevation needed (word count $words)"
+
+      - name: Install the MSI
+        run: |
+          $msi = (Resolve-Path "dist\ClaudeTogether-$env:VERSION.msi").Path
+          $p = Start-Process msiexec.exe -ArgumentList "/i `"$msi`" /qn /norestart /l*v `"$env:RUNNER_TEMP\install.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\install.log" -Tail 60; throw "Install failed with exit code $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether'
+          foreach ($f in 'ClaudeTogether.exe', 'claude-together.exe', 'LICENSE.txt') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "Missing after install: $f" }
+          }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if (($userPath -split ';') -notcontains $dir) { throw "User PATH does not contain $dir" }
+          $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) 'Claude Together.lnk'
+          if (-not (Test-Path $lnk)) { throw "Start Menu shortcut missing: $lnk" }
+          Write-Host "Installed to $dir"
+
+      - name: Smoke test the installed CLI
+        run: |
+          $cli = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether\claude-together.exe'
+          $env:CLAUDE_TOGETHER_LANG = 'en'
+          function Invoke-Cli([int]$Expect, [string[]]$CliArgs) {
+            $out = & $cli @CliArgs 2>&1 | Out-String
+            if ($LASTEXITCODE -ne $Expect) { throw "claude-together $($CliArgs -join ' ') exited $LASTEXITCODE, expected ${Expect}: $out" }
+            return $out
+          }
+
+          if ((Invoke-Cli 0 @('version')) -notmatch "claude-together $env:VERSION") { throw "Wrong version printed" }
+          Invoke-Cli 0 @('list', '--json') | Out-Null          # also exercises the WMI process query
+          Invoke-Cli 3 @('setup', 'work', 'personal', '-y') | Out-Null   # 3 = accounts still need to sign in
+
+          $scan = Invoke-Cli 0 @('scan', '--json') | ConvertFrom-Json
+          if (@($scan | Where-Object { $_.registered }).Count -ne 2) { throw "scan did not list both accounts" }
+          Invoke-Cli 3 @('whoami') | Out-Null
+
+          $link = Get-Item (Join-Path $env:USERPROFILE '.claude-work\projects')
+          if ($link.LinkType -ne 'Junction') { throw "projects is not a junction (LinkType '$($link.LinkType)')" }
+
+          Invoke-Cli 0 @('skill', 'install') | Out-Null
+          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude-personal\skills\claude-together\SKILL.md'))) { throw "Skill is not visible from the second profile" }
+
+          # delegate through a stand-in 'claude.cmd'
+          $fake = Join-Path $env:RUNNER_TEMP 'fake'
+          New-Item -ItemType Directory -Force $fake | Out-Null
+          Set-Content (Join-Path $fake 'claude.cmd') "@echo off`r`nfindstr `"^`"`r`necho acct=%CLAUDE_TOGETHER_ACCOUNT% depth=%CLAUDE_TOGETHER_DEPTH%`r`necho args=%*" -Encoding ascii
+          Set-Content (Join-Path $env:USERPROFILE '.claude-personal\.credentials.json') '{}'
+          $env:PATH = "$fake;$env:PATH"
+          $res = Invoke-Cli 0 @('delegate', 'personal', '--prompt', 'hello there', '--max-turns', '2', '--json', '--cwd', $env:RUNNER_TEMP) | ConvertFrom-Json
+          if ($res.exitCode -ne 0) { throw "delegate failed: $($res | ConvertTo-Json)" }
+          foreach ($want in 'hello there', 'acct=personal depth=1', 'args=-p --max-turns 2') {
+            if ($res.output -notmatch [regex]::Escape($want)) { throw "delegate output lacks '$want': $($res.output)" }
+          }
+          Write-Host "CLI smoke test passed"
+
+      - name: Smoke test the installed app window
+        run: |
+          $gui = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether\ClaudeTogether.exe'
+          $p = Start-Process $gui -PassThru
+          Start-Sleep -Seconds 6
+          if ($p.HasExited) { throw "ClaudeTogether.exe exited early with code $($p.ExitCode)" }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "App window stayed open"
+
+      - name: Uninstall the MSI
+        run: |
+          $msi = (Resolve-Path "dist\ClaudeTogether-$env:VERSION.msi").Path
+          $p = Start-Process msiexec.exe -ArgumentList "/x `"$msi`" /qn /norestart /l*v `"$env:RUNNER_TEMP\uninstall.log`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\uninstall.log" -Tail 60; throw "Uninstall failed with exit code $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether'
+          if (Test-Path $dir) { throw "Install folder is still there after uninstall: $dir" }
+          if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $dir) { throw "PATH entry was not removed" }
+          if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude-work'))) { throw "Uninstall must not touch account data" }
+          Write-Host "Uninstalled cleanly; account data untouched"
+
+      - name: Collect release files
+        run: |
+          Compress-Archive -Path bin\ClaudeTogether.exe, bin\claude-together.exe, LICENSE -DestinationPath "dist\ClaudeTogether-$env:VERSION-portable.zip"
+          $lines = Get-ChildItem dist -File | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" }
+          $lines | Set-Content dist\SHA256SUMS.txt -Encoding ascii
+          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-together-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: claude-together-${{ needs.windows.outputs.version }}
+          path: dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Claude Together ${{ needs.windows.outputs.version }}" \
+            --generate-notes

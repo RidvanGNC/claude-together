@@ -93,6 +93,75 @@ static class CoreTests
         Check(note != null && File.Exists(P(Paths.DefaultData, "claude-code-sessions", "u", "s.json")) && !File.Exists(Paths.LockFile)
               && Directory.GetDirectories(Paths.Roaming, "Claude.station-*").Length == 1, "interrupted sign-in is rolled back");
 
+        // ---- agent mode: scan, current account, skill, delegate ----
+        Config cfgA = Core.Load();
+        cfgA.Accounts.Clear();
+        cfgA.Accounts.Add(new Account { Name = "one", Desktop = Account.PrimaryMode });
+        cfgA.Accounts.Add(new Account { Name = "two", Desktop = Account.SecondaryMode });
+        Core.Save(cfgA);
+
+        Directory.CreateDirectory(P(Paths.Home, ".claude-extra"));
+        Directory.CreateDirectory(P(Paths.Roaming, "Claude-extra"));
+        File.WriteAllText(P(Paths.Roaming, "Claude-extra", "Local State"), "x");
+        Directory.CreateDirectory(P(Paths.Roaming, "Claude.parked-zzz"));
+        List<ScanEntry> scan = Core.Scan(cfgA);
+        Check(scan.Count(e => e.Registered) == 2 && scan[0].Name == "one" && scan[1].Name == "two", "scan lists registered accounts first");
+        ScanEntry extra = scan.FirstOrDefault(e => e.Name == "extra");
+        Check(extra != null && !extra.Registered && extra.DesktopSignedIn, "scan reports unregistered folders as hints");
+        Check(!scan.Any(e => e.Name == "shared" || e.Name == "profiles" || e.Name.Contains("parked")), "scan ignores shared, legacy and parked folders");
+        Check(Core.CodeSignedIn(p1) && !Core.CodeSignedIn(p2), "code sign-in: credentials file or oauthAccount");
+
+        Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_ACCOUNT", null);
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", null);
+        string src;
+        Check(Core.CurrentAccount(cfgA, out src) == null && src == "none", "whoami: nothing set");
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", p2 + Path.DirectorySeparatorChar);
+        Account cur = Core.CurrentAccount(cfgA, out src);
+        Check(cur != null && cur.Name == "two" && src == "configDir", "whoami: from CLAUDE_CONFIG_DIR (trailing slash ok)");
+        Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_ACCOUNT", "ONE");
+        cur = Core.CurrentAccount(cfgA, out src);
+        Check(cur != null && cur.Name == "one" && src == "env", "whoami: env name wins, case-insensitive");
+        Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_ACCOUNT", null);
+        Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", null);
+
+        string skill = Core.InstallSkill(cfgA, log);
+        Check(File.Exists(skill) && File.ReadAllText(skill).StartsWith("---") && File.Exists(P(p2, "skills", "claude-together", "SKILL.md")), "skill installed once, visible from every profile");
+        Check(Core.RemoveSkill() && !File.Exists(skill) && Directory.Exists(P(Paths.Store, "skills")), "skill removed, shared skills folder kept");
+
+        // delegate, with a fake 'claude' script that reports what it received
+        string fakeBin = P(Paths.Home, "fakeclaude");
+        Directory.CreateDirectory(fakeBin);
+        string fake = P(fakeBin, "claude");
+        File.WriteAllText(fake, "#!/bin/sh\nIN=$(cat)\necho \"in=$IN\"\necho \"n=$#\"\necho \"args=$*\"\necho \"dir=$CLAUDE_CONFIG_DIR\"\necho \"acct=$CLAUDE_TOGETHER_ACCOUNT depth=$CLAUDE_TOGETHER_DEPTH key=$ANTHROPIC_API_KEY\"\necho oops >&2\n[ -n \"$FAKE_SLEEP\" ] && sleep $FAKE_SLEEP\nexit ${FAKE_EXIT:-0}\n");
+        System.Diagnostics.Process.Start("chmod", "+x \"" + fake + "\"").WaitForExit();
+
+        Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", "sk-leak");
+        DelegateRequest rq = new DelegateRequest { Target = cfgA.Accounts[0], Prompt = "héllo task", WorkDir = Paths.Home, ClaudeCommand = fake, MaxTurns = 3, AllowEdits = true };
+        rq.ExtraArgs.Add("--model"); rq.ExtraArgs.Add("two words");
+        DelegateResult dr = Core.Delegate(rq);
+        Check(dr.ExitCode == 0 && !dr.TimedOut && dr.Output.Contains("in=héllo task"), "delegate: prompt reaches the session through stdin (UTF-8)");
+        Check(dr.Output.Contains("n=7\n") && dr.Output.Contains("args=-p --permission-mode acceptEdits --max-turns 3 --model two words"), "delegate: flags passed, quoted argument stays one argument");
+        Check(dr.Output.Contains("dir=" + p1 + "\n") && dr.Output.Contains("acct=one depth=1 key=\n"), "delegate: target config folder, account and depth set, API key removed");
+        Check(dr.Error.Contains("oops"), "delegate: error output captured");
+        Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
+
+        Environment.SetEnvironmentVariable("FAKE_EXIT", "7");
+        Check(Core.Delegate(new DelegateRequest { Target = cfgA.Accounts[0], Prompt = "x", ClaudeCommand = fake }).ExitCode == 7, "delegate: exit code passed back");
+        Environment.SetEnvironmentVariable("FAKE_EXIT", null);
+
+        Environment.SetEnvironmentVariable("FAKE_SLEEP", "3");
+        DelegateResult slow = Core.Delegate(new DelegateRequest { Target = cfgA.Accounts[0], Prompt = "x", ClaudeCommand = fake, TimeoutSec = 1 });
+        Check(slow.TimedOut && slow.Seconds < 3, "delegate: timeout stops the session");
+        Environment.SetEnvironmentVariable("FAKE_SLEEP", null);
+
+        try { Core.Delegate(new DelegateRequest { Target = cfgA.Accounts[1], Prompt = "x", ClaudeCommand = fake }); Check(false, "unsigned target allowed"); }
+        catch (SignInNeededException) { Check(true, "delegate: target without Claude Code sign-in is refused"); }
+
+        Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_DEPTH", "1");
+        try { Core.Delegate(new DelegateRequest { Target = cfgA.Accounts[0], Prompt = "x", ClaudeCommand = fake }); Check(false, "nested delegate allowed"); }
+        catch (InvalidOperationException) { Check(true, "delegate: a delegated session cannot delegate again"); }
+        Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_DEPTH", null);
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : "FAILURES: " + failures);
         return failures == 0 ? 0 : 1;
     }

@@ -42,4 +42,47 @@ namespace ClaudeTogether
         public volatile bool Force;
         public volatile bool Cancel;
     }
+
+    /// <summary>One account found by a scan.</summary>
+    class ScanEntry
+    {
+        public string Name;
+        public bool Registered;
+        public bool Primary;
+        public string ConfigDir;
+        public bool ConfigDirExists;
+        public bool CodeSignedIn;
+        public string DesktopDir;
+        public bool DesktopSignedIn;
+    }
+
+    /// <summary>A headless Claude Code run in another account.</summary>
+    class DelegateRequest
+    {
+        public Account Target;
+        public string Prompt;
+        public string WorkDir;
+        public int MaxTurns;
+        public int TimeoutSec = 1800;
+        public bool AllowEdits;
+        public string ClaudeCommand = "claude";
+        public List<string> ExtraArgs = new List<string>();
+        public Action<string> OnOutput;
+        public Action<string> OnError;
+    }
+
+    class DelegateResult
+    {
+        public int ExitCode;
+        public bool TimedOut;
+        public double Seconds;
+        public string Output = "";
+        public string Error = "";
+    }
+
+    /// <summary>The target account has not signed in to Claude Code yet.</summary>
+    class SignInNeededException : InvalidOperationException
+    {
+        public SignInNeededException(string message) : base(message) { }
+    }
 }

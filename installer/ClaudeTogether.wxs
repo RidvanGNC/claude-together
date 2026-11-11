@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Per-user installer for Claude Together (WiX v5). No administrator rights needed.
+  Installs for the current Windows user under %LOCALAPPDATA%\Programs\ClaudeTogether,
+  adds that folder to the user's PATH and adds a Start Menu shortcut.
+  Uninstalling removes only what this package installed; accounts and Claude data are never touched.
+
+  Build (variables are passed with -d):
+    Version, BinDir (folder with both exes), IconFile, LicenseFile (rtf), LicenseText (plain LICENSE)
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <Package Name="Claude Together"
+           Manufacturer="Rıdvan Gonca"
+           Version="$(var.Version)"
+           UpgradeCode="bd722b0d-8e86-4154-bd3e-a83f9bab8500"
+           Scope="perUser"
+           Compressed="yes">
+
+    <SummaryInformation Description="Run multiple Claude accounts side by side on one Windows PC." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Claude Together is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconFile)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/RidvanGNC/claude-together" />
+
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseFile)" />
+    <ui:WixUI Id="WixUI_Minimal" />
+
+    <!-- %LOCALAPPDATA%\Programs\ClaudeTogether -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="ClaudeTogether" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Claude Together" Level="1">
+      <ComponentGroupRef Id="AppComponents" />
+    </Feature>
+
+    <!-- Per-user components use a registry value under HKCU as key path (ICE38). -->
+    <ComponentGroup Id="AppComponents" Directory="INSTALLFOLDER">
+      <Component Id="GuiComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="Gui" Type="integer" Value="1" KeyPath="yes" />
+        <File Id="GuiExe" Source="$(var.BinDir)\ClaudeTogether.exe" />
+      </Component>
+
+      <Component Id="CliComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="Cli" Type="integer" Value="1" KeyPath="yes" />
+        <File Id="CliExe" Source="$(var.BinDir)\claude-together.exe" />
+      </Component>
+
+      <Component Id="LicenseComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="License" Type="integer" Value="1" KeyPath="yes" />
+        <File Id="LicenseFile" Name="LICENSE.txt" Source="$(var.LicenseText)" />
+      </Component>
+
+      <!-- Adds the install folder to the user's PATH so "claude-together" works in new terminals. -->
+      <Component Id="PathComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="Path" Type="integer" Value="1" KeyPath="yes" />
+        <Environment Id="UserPath" Name="Path" Value="[INSTALLFOLDER]" Action="set" Part="last" System="no" Permanent="no" />
+      </Component>
+
+      <Component Id="ShortcutComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
+        <Shortcut Id="StartMenuShortcut" Name="Claude Together" Description="Run multiple Claude accounts side by side"
+                  Directory="ProgramMenuFolder" Target="[INSTALLFOLDER]ClaudeTogether.exe" WorkingDirectory="INSTALLFOLDER" />
+      </Component>
+
+      <!-- Removes the (then empty) folders on uninstall (ICE64). -->
+      <Component Id="CleanupComponent">
+        <RegistryValue Root="HKCU" Key="Software\ClaudeTogether\Components" Name="Cleanup" Type="integer" Value="1" KeyPath="yes" />
+        <RemoveFolder Id="RemoveInstallFolder" Directory="INSTALLFOLDER" On="uninstall" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="UserProgramsDir" On="uninstall" />
+      </Component>
+    </ComponentGroup>
+  </Package>
+</Wix>

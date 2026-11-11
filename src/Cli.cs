@@ -11,7 +11,10 @@ namespace ClaudeTogether
     /// <summary>Command line front end: claude-together &lt;command&gt; [options].</summary>
     static class Cli
     {
-        public const string Version = "1.0.0";
+        public const string Version = "1.1.0";
+
+        const string CliExe = "claude-together.exe";
+        const string GuiExe = "ClaudeTogether.exe";
 
         const int ExitOk = 0;
         const int ExitError = 1;
@@ -21,8 +24,8 @@ namespace ClaudeTogether
         const string Help =
 @"claude-together " + Version + @" - run multiple Claude accounts side by side
 
-Made for people who use several Claude accounts side by side on their own computer, with their own input.
-Not built for automation; it sends no data anywhere.
+For your own Claude accounts on your own computer: run them side by side and split your own work between them.
+Not for selling or sharing accounts. It sends no data anywhere and has no remote access.
 
 Usage: claude-together <command> [options]
 
@@ -38,18 +41,29 @@ Commands
   close [<name>...] [--all]    Stop Claude Desktop for accounts
   run <name> [-- <command>]    Run a command with the account's Claude Code config (default: claude)
   env <name>                   Print the environment variables of an account
+  scan                         Find the accounts on this computer (including folders that are not registered)
+  whoami                       Show which account this session runs as, and whether it may delegate
+  delegate <name> [options]    Run one headless Claude Code session as another account and wait for the result
+  skill install|remove         Add or remove the agent skill in the shared skills folder
   backup                       Copy current Claude data to backup folders; changes nothing else
   recover                      Restore data parked by an interrupted login
-  install                      Copy to %LOCALAPPDATA%\Programs\ClaudeTogether, add to PATH, add Start Menu shortcut
-  uninstall                    Remove the PATH entry and the shortcut
   version, help
 
 Options
   -y, --yes                    Do not ask for confirmation (closes Claude Desktop when needed)
-  --json                       Machine-readable output (list)
+  --json                       Machine-readable output (list, scan, whoami, delegate)
   --all                        Apply to every account (open, close)
   --shell cmd|powershell|json  Output format of env (default: cmd)
   --lang en|tr                 Message language (default: system language or CLAUDE_TOGETHER_LANG)
+
+Options of delegate
+  --prompt <text>              The task, as text
+  --prompt-file <file>         The task, from a file ('-' reads standard input)
+  --cwd <folder>               Working folder of the other session (default: current folder)
+  --max-turns <n>              Limit the number of agent turns
+  --timeout <seconds>          Stop the session after this time (default: 1800)
+  --allow-edits                Let the other session edit files (default: read-only)
+  -- <claude options>          Extra Claude Code options, for example: -- --model sonnet
 
 Exit codes: 0 ok, 1 error, 2 usage error, 3 action needed (for example an account must sign in).
 
@@ -58,6 +72,8 @@ Examples
   claude-together login personal
   claude-together open --all
   claude-together run work -- claude --resume
+  claude-together scan --json
+  claude-together delegate personal --prompt-file brief.md --cwd C:\src\app --json
 ";
 
         sealed class UsageException : Exception
@@ -77,6 +93,8 @@ Examples
             public bool Has(params string[] names) { return names.Any(n => Flags.Contains(n)); }
         }
 
+        static readonly HashSet<string> ValueOptions = new HashSet<string> { "--shell", "--lang", "--prompt", "--prompt-file", "--cwd", "--max-turns", "--timeout" };
+
         static Args Parse(string[] argv)
         {
             Args a = new Args();
@@ -86,7 +104,7 @@ Examples
                 string t = argv[i];
                 if (rest) { a.Rest.Add(t); continue; }
                 if (t == "--") { rest = true; continue; }
-                if (t == "--shell" || t == "--lang")
+                if (ValueOptions.Contains(t))
                 {
                     if (i + 1 >= argv.Length) throw new UsageException("Missing value for " + t, ExitUsage);
                     a.Options[t] = argv[++i];
@@ -105,7 +123,9 @@ Examples
                 Args a = Parse(argv);
                 string lang;
                 if (a.Options.TryGetValue("--lang", out lang)) Loc.Lang = lang.ToLowerInvariant();
-                if (Loc.Lang != "en") try { Console.OutputEncoding = Encoding.UTF8; } catch (Exception) { }
+                // Agents read JSON and delegate output, so those are always UTF-8.
+                if (Loc.Lang != "en" || a.Has("--json") || a.Command == "delegate")
+                    try { Console.OutputEncoding = new UTF8Encoding(false); } catch (Exception) { }
 
                 if (a.Has("-h", "--help")) a.Command = "help";
                 if (a.Has("-v", "--version")) a.Command = "version";
@@ -124,10 +144,12 @@ Examples
                     case "close": return Close(a);
                     case "run": return RunCommand(a);
                     case "env": return Env(a);
+                    case "scan": return ScanCommand(a);
+                    case "whoami": return WhoAmI(a);
+                    case "delegate": return DelegateCommand(a);
+                    case "skill": return SkillCommand(a);
                     case "backup": return BackupCommand(a);
                     case "recover": return Recover();
-                    case "install": Installer.Install(Console.WriteLine); return ExitOk;
-                    case "uninstall": Installer.Uninstall(Console.WriteLine); return ExitOk;
                     default: throw new UsageException("Unknown command: " + a.Command + ". Run 'claude-together help'.", ExitUsage);
                 }
             }
@@ -191,8 +213,8 @@ Examples
 
         static int OpenUi()
         {
-            string gui = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Installer.GuiExe);
-            if (!File.Exists(gui)) throw new InvalidOperationException(Installer.GuiExe + " was not found next to " + Installer.CliExe + ".");
+            string gui = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, GuiExe);
+            if (!File.Exists(gui)) throw new InvalidOperationException(GuiExe + " was not found next to " + CliExe + ".");
             Process.Start(gui);
             return ExitOk;
         }
@@ -237,6 +259,8 @@ Examples
 
             if (a.Has("--json"))
             {
+                string source;
+                Account current = Core.CurrentAccount(cfg, out source);
                 List<object> rows = new List<object>();
                 foreach (Account x in cfg.Accounts)
                 {
@@ -245,6 +269,8 @@ Examples
                     d["mode"] = x.Desktop;
                     d["signedIn"] = Core.Ready(x);
                     d["running"] = running[x.Name];
+                    d["codeSignedIn"] = Core.CodeSignedIn(Paths.ProfileDir(x.Name));
+                    d["current"] = current != null && current.Name == x.Name;
                     d["configDir"] = Paths.ProfileDir(x.Name);
                     d["desktopDataDir"] = Paths.DataDir(x);
                     rows.Add(d);
@@ -333,22 +359,16 @@ Examples
             return ExitOk;
         }
 
-        static string Quote(string s)
-        {
-            return s.Length > 0 && s.IndexOfAny(new[] { ' ', '\t', '"' }) < 0 ? s : "\"" + s.Replace("\"", "\\\"") + "\"";
-        }
-
-        /// <summary>Runs a command in this console with CLAUDE_CONFIG_DIR set. Goes through cmd so claude.cmd shims work.</summary>
+        /// <summary>Runs a command in this console with CLAUDE_CONFIG_DIR set to the account's folder.</summary>
         static int RunCommand(Args a)
         {
             Config cfg = RequireConfig();
             Account acct = RequireAccount(cfg, a);
             List<string> command = a.Rest.Count > 0 ? a.Rest : new List<string> { "claude" };
 
-            ProcessStartInfo psi = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe");
-            psi.Arguments = "/d /s /c \"" + string.Join(" ", command.Select(Quote).ToArray()) + "\"";
-            psi.UseShellExecute = false;
+            ProcessStartInfo psi = Core.CommandStartInfo(command);
             psi.EnvironmentVariables["CLAUDE_CONFIG_DIR"] = Paths.ProfileDir(acct.Name);
+            psi.EnvironmentVariables["CLAUDE_TOGETHER_ACCOUNT"] = acct.Name;
             using (Process p = Process.Start(psi))
             {
                 p.WaitForExit();
@@ -376,6 +396,150 @@ Examples
             }
             else throw new UsageException("--shell must be cmd, powershell or json.", ExitUsage);
             return ExitOk;
+        }
+
+        static string Yes(bool v, string no) { return v ? "yes" : no; }
+
+        static int ScanCommand(Args a)
+        {
+            Config cfg = Core.Load();
+            List<ScanEntry> found = Core.Scan(cfg);
+
+            if (a.Has("--json"))
+            {
+                List<object> rows = new List<object>();
+                foreach (ScanEntry e in found)
+                {
+                    Dictionary<string, object> d = new Dictionary<string, object>();
+                    d["name"] = e.Name;
+                    d["registered"] = e.Registered;
+                    d["primary"] = e.Primary;
+                    d["codeSignedIn"] = e.CodeSignedIn;
+                    d["desktopSignedIn"] = e.DesktopSignedIn;
+                    d["configDir"] = e.ConfigDir;
+                    d["desktopDataDir"] = e.DesktopDir;
+                    rows.Add(d);
+                }
+                Console.WriteLine(Core.ToJson(rows));
+                return ExitOk;
+            }
+
+            if (found.Count == 0) { Console.WriteLine(Loc.T("No accounts found.")); return ExitOk; }
+            int w = Math.Max(4, found.Max(x => x.Name.Length));
+            Console.WriteLine("{0}  {1}  {2}  {3}", "NAME".PadRight(w), "LISTED".PadRight(6), "CODE".PadRight(6), "DESKTOP");
+            foreach (ScanEntry e in found)
+                Console.WriteLine("{0}  {1}  {2}  {3}", e.Name.PadRight(w), Yes(e.Registered, "no").PadRight(6), (e.CodeSignedIn ? "ready" : "needed").PadRight(6), e.DesktopSignedIn ? "ready" : "needed");
+            if (found.Any(x => !x.Registered)) Console.WriteLine(Loc.T("Accounts that are not listed are only hints. Add one with: claude-together add <name>"));
+            return ExitOk;
+        }
+
+        static int WhoAmI(Args a)
+        {
+            Config cfg = Core.Load();
+            string source;
+            Account me = Core.CurrentAccount(cfg, out source);
+            int depth = Core.CurrentDepth();
+            bool canDelegate = depth < Core.MaxDelegateDepth;
+
+            if (a.Has("--json"))
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["account"] = me == null ? null : me.Name;
+                d["source"] = source;
+                d["configDir"] = me == null ? null : Paths.ProfileDir(me.Name);
+                d["depth"] = depth;
+                d["canDelegate"] = canDelegate;
+                Console.WriteLine(Core.ToJson(d));
+            }
+            else if (me != null) Console.WriteLine(me.Name + (canDelegate ? "" : Loc.T(" (delegated session: cannot delegate)")));
+            else Console.WriteLine(Loc.T("No claude-together account detected for this session."));
+            return me == null ? ExitNeedsAction : ExitOk;
+        }
+
+        static int IntOption(Args a, string name, int fallback)
+        {
+            string text;
+            if (!a.Options.TryGetValue(name, out text)) return fallback;
+            int n;
+            if (!int.TryParse(text, out n) || n < 0) throw new UsageException(name + " needs a whole number.", ExitUsage);
+            return n;
+        }
+
+        static int DelegateCommand(Args a)
+        {
+            Config cfg = RequireConfig();
+            Account target = RequireAccount(cfg, a);
+
+            string prompt, file;
+            a.Options.TryGetValue("--prompt", out prompt);
+            if (a.Options.TryGetValue("--prompt-file", out file))
+            {
+                if (prompt != null) throw new UsageException("Use either --prompt or --prompt-file.", ExitUsage);
+                if (file == "-")
+                {
+                    try { Console.InputEncoding = new UTF8Encoding(false); } catch (Exception) { }
+                    prompt = Console.In.ReadToEnd();
+                }
+                else
+                {
+                    if (!File.Exists(file)) throw new UsageException(Loc.T("File not found: {0}", file), ExitUsage);
+                    prompt = File.ReadAllText(file, Encoding.UTF8);
+                }
+            }
+            if (string.IsNullOrWhiteSpace(prompt)) throw new UsageException("Give the task with --prompt <text> or --prompt-file <file>.", ExitUsage);
+
+            bool json = a.Has("--json");
+            DelegateRequest req = new DelegateRequest();
+            req.Target = target;
+            req.Prompt = prompt;
+            a.Options.TryGetValue("--cwd", out req.WorkDir);
+            req.MaxTurns = IntOption(a, "--max-turns", 0);
+            req.TimeoutSec = IntOption(a, "--timeout", req.TimeoutSec);
+            req.AllowEdits = a.Has("--allow-edits");
+            req.ExtraArgs = a.Rest;
+            if (!json)
+            {
+                req.OnOutput = delegate(string s) { Console.Out.Write(s); Console.Out.Flush(); };
+                req.OnError = delegate(string s) { Console.Error.Write(s); };
+            }
+
+            DelegateResult res;
+            try { res = Core.Delegate(req); }
+            catch (SignInNeededException ex) { Console.Error.WriteLine(ex.Message); return ExitNeedsAction; }
+            catch (InvalidOperationException ex) { Console.Error.WriteLine(ex.Message); return ExitUsage; }
+
+            bool ok = res.ExitCode == 0 && !res.TimedOut;
+            if (json)
+            {
+                Dictionary<string, object> d = new Dictionary<string, object>();
+                d["account"] = target.Name;
+                d["exitCode"] = res.ExitCode;
+                d["timedOut"] = res.TimedOut;
+                d["seconds"] = res.Seconds;
+                d["output"] = res.Output;
+                d["error"] = res.Error;
+                Console.WriteLine(Core.ToJson(d));
+            }
+            else if (res.TimedOut) Console.Error.WriteLine(Loc.T("Stopped after {0} seconds.", req.TimeoutSec));
+            return ok ? ExitOk : ExitError;
+        }
+
+        static int SkillCommand(Args a)
+        {
+            string action = a.Positional.Count > 0 ? a.Positional[0].ToLowerInvariant() : "";
+            if (action == "install")
+            {
+                Config cfg = RequireConfig();
+                string file = Core.InstallSkill(cfg, Console.WriteLine);
+                Console.WriteLine(Loc.T("Skill installed: {0}", file));
+                return ExitOk;
+            }
+            if (action == "remove")
+            {
+                Console.WriteLine(Core.RemoveSkill() ? Loc.T("Skill removed.") : Loc.T("The skill is not installed."));
+                return ExitOk;
+            }
+            throw new UsageException("Usage: claude-together skill install|remove", ExitUsage);
         }
 
         static int BackupCommand(Args a)

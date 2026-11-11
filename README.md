@@ -16,8 +16,8 @@
 </div>
 
 > **Intended use**
-> This app is designed solely so that people can use different sessions on their personal computers at the same time, with human input.
-> It is explicitly **not** meant for automation of any kind, neither remote nor local, and it does not share any data with the outside.
+> Claude Together is for **your own Claude accounts on your own computer**. Run several of them side by side, share common settings, and split or hand off your own work between them, by hand or with an AI agent you direct.
+> It is **not** for selling, renting or sharing accounts, or for giving other people access to your accounts. It sends no data anywhere and has no remote access.
 
 ## Why
 
@@ -31,8 +31,9 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 - **Guided first-time setup**: Back up → Distribute → Run → Ready. Nothing is deleted.
 - **Shared by default**: settings, `CLAUDE.md`, skills, plugins, commands, agents, hooks, history. Sign-in stays per account.
 - **Command line too**: `claude-together list`, `open`, `login`, `run`, and more, for people who prefer a terminal.
+- **Agent mode**: an AI agent can discover your other accounts (`scan`, `whoami`) and hand a task to one of them (`delegate`). Local only. See [Working across your accounts](#working-across-your-accounts).
 - **Safe**: every sign-in is wrapped in a recoverable step; an interrupted one is rolled back on the next start.
-- **No install needed**: two small `.exe` files. No admin rights. No dependencies. Turkish and English UI.
+- **Simple install**: one MSI, installed for your Windows user only. No admin rights, no dependencies. Turkish and English UI.
 
 <details>
 <summary>Screenshot of the setup wizard</summary>
@@ -42,9 +43,13 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 
 ## Get it
 
-1. Download `ClaudeTogether.exe` and `claude-together.exe` from the [Releases](../../releases) page, or build them yourself (see [Build](#build)).
-2. Double-click **`ClaudeTogether.exe`**. If Windows SmartScreen warns about an unknown publisher, choose **More info → Run anyway**.
-3. Optional, for the terminal: run `claude-together install` once. It copies both files to `%LOCALAPPDATA%\Programs\ClaudeTogether`, adds that folder to your user `PATH` and adds a Start Menu shortcut. No admin rights needed.
+1. Download **`ClaudeTogether-<version>.msi`** from the [Releases](../../releases) page.
+2. Double-click it. If Windows SmartScreen warns about an unknown publisher, choose **More info → Run anyway**.
+3. Open **Claude Together** from the Start Menu. In a new terminal, `claude-together` works too.
+
+The installer needs no administrator rights. It installs for the Windows user who runs it, into `%LOCALAPPDATA%\Programs\ClaudeTogether`, adds that folder to your user `PATH` and adds a Start Menu shortcut. Update by running a newer MSI. Uninstall in **Settings → Apps**; your accounts and Claude data are never touched. For a silent install: `msiexec /i ClaudeTogether-<version>.msi /qn`.
+
+Prefer no installer? Each release also has a `-portable.zip` with the two `.exe` files. A [SHA256SUMS.txt](../../releases) file lists checksums.
 
 ## Quick start (GUI)
 
@@ -79,20 +84,64 @@ claude-together run work -- claude      :: Claude Code in this terminal with the
 | `close [<name>...] [--all]` | Stop Claude Desktop for accounts |
 | `run <name> [-- <command>]` | Run a command with the account's Claude Code config folder (default command: `claude`) |
 | `env <name>` | Print the account's environment (`--shell cmd\|powershell\|json`) |
+| `scan` | Find the accounts on this computer, including folders that are not registered |
+| `whoami` | Show which account this session runs as, and whether it may delegate |
+| `delegate <name> [options]` | Run one headless Claude Code session as another account and wait for the result |
+| `skill install\|remove` | Add or remove the agent skill in the shared skills folder |
 | `backup` | Copy current Claude data to backup folders |
 | `recover` | Restore data parked by an interrupted login |
-| `install` / `uninstall` | Per-user install: PATH and Start Menu shortcut |
 | `version`, `help` | |
 
 | Option | Meaning |
 | --- | --- |
 | `-y`, `--yes` | Skip confirmations (Claude Desktop is closed when a command needs that) |
 | `--all` | Apply to every account (`open`, `close`) |
-| `--json` | JSON output for `list` |
+| `--json` | JSON output for `list`, `scan`, `whoami` and `delegate` |
 | `--shell cmd\|powershell\|json` | Output format of `env` (default `cmd`) |
 | `--lang en\|tr` | Message language. Default: Windows display language, or the `CLAUDE_TOGETHER_LANG` variable |
 
 Exit codes: `0` ok · `1` error · `2` usage error · `3` action needed (for example an account has to sign in).
+
+## Working across your accounts
+
+Claude Code's built-in subagents always run in the account of the current session. To give a task to *another* of your accounts, `claude-together` starts a separate headless Claude Code session (`claude -p`) with that account's config folder. Everything stays on your computer.
+
+**1. Let the agent find your accounts**
+
+```bat
+claude-together scan --json       :: accounts on this PC: registered, signed in to Claude Code, signed in to Desktop
+claude-together whoami --json     :: which account this session runs as, and whether it may delegate
+claude-together skill install     :: put an agent skill in the shared skills folder, so every account's agent knows the above
+```
+
+`scan` also lists folders that look like accounts but are not registered. Those are hints only. Add one with `claude-together add <name>`.
+
+**2. Hand a task to another account**
+
+```bat
+claude-together delegate personal --prompt-file brief.md --cwd C:\src\app --json
+claude-together delegate personal --prompt "Review the diff in this folder" --max-turns 5
+claude-together delegate personal --prompt-file brief.md --allow-edits -- --model sonnet
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--prompt <text>` or `--prompt-file <file>` | The task. `--prompt-file -` reads standard input |
+| `--cwd <folder>` | Working folder of the other session (default: current folder) |
+| `--max-turns <n>` | Limit the number of agent turns |
+| `--timeout <seconds>` | Stop the session after this time (default 1800) |
+| `--allow-edits` | Let the other session edit files. Without it the session is read-only |
+| `-- <options>` | Extra Claude Code options, for example `-- --model sonnet --output-format json` |
+
+With `--json` the result is one object: `account`, `exitCode`, `timedOut`, `seconds`, `output`, `error`. Without it the session's output is shown as it arrives. `delegate` exits `0` on success, `1` if the session failed or timed out, `3` if the target account has no Claude Code sign-in (run `claude-together run <name>`, then `/login`).
+
+Good to know:
+
+- The other session sees none of your conversation, so the task needs to be complete: goal, folder, files, expected result.
+- If it edits files, give it its own git worktree or folder. Two sessions in one folder overwrite each other.
+- One level only: a delegated session cannot delegate again.
+- The target runs with its own sign-in. `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are removed from its environment, so a variable set for the first account cannot take over.
+- Only your own accounts, and within the terms that apply to them (see [Limitations](#limitations)).
 
 ## How it works
 
@@ -114,6 +163,7 @@ Exit codes: `0` ok · `1` error · `2` usage error · `3` action needed (for exa
 - Windows 10/11 only. Needs the Claude Desktop app. macOS and Linux are untested (see [below](#macos-and-linux-untested-help-wanted)).
 - All Claude windows share one name and icon in the taskbar.
 - Cowork's virtual machine runs for one window at a time.
+- `delegate` works with Claude Code only (not Claude Desktop or Cowork), and the target account needs its own Claude Code sign-in.
 - Signing in needs the browser to be signed in to claude.ai with the account you are adding. Signing in to another account in the browser first is the usual cause of "wrong account".
 - Signing in or refreshing a session closes all Claude Desktop windows for a moment.
 - Unofficial. Not affiliated with or endorsed by Anthropic; "Claude" is a trademark of Anthropic. Using several accounts must follow the terms that apply to your accounts. That is your responsibility.
@@ -122,15 +172,15 @@ Exit codes: `0` ok · `1` error · `2` usage error · `3` action needed (for exa
 
 Claude Together has only been written and tried on Windows 10/11. I have **not** tested it on macOS or any Linux shell, and I am looking for people who can help there.
 
-- The Windows-specific parts (WMI process detection, `mklink` junctions, robocopy, the Appx lookup, the `install` step) will not work on those systems as they are.
+- The Windows-specific parts (WMI process detection, `mklink` junctions, robocopy, the Appx lookup, the MSI installer) will not work on those systems as they are.
 - The core ideas (`CLAUDE_CONFIG_DIR`, `--user-data-dir`, the login station) may carry over, so a port looks possible. Credential storage differs on macOS, which needs checking.
 - The build and the core tests run under Mono on Linux, but they only cover file logic with a stubbed shell. The app itself has not been run there.
 
-If you use macOS or Linux and want to help, please try it and open an issue with what you saw, or send a pull request. The same intended use applies to any port: personal computers, human input, no automation.
+If you use macOS or Linux and want to help, please try it and open an issue with what you saw, or send a pull request. The same intended use applies to any port: your own accounts on your own computer.
 
 ## Privacy
 
-Everything stays on your computer. The code contains no network access. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`).
+Everything stays on your computer. The code contains no network access; `delegate` only starts the local `claude` program, which talks to Anthropic the way it always does. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`).
 
 ## Build
 
@@ -143,14 +193,31 @@ build.cmd
 This creates `bin\ClaudeTogether.exe` (windowed) and `bin\claude-together.exe` (console) from the same sources. On Linux or macOS with Mono, `sh build.sh` builds the same files, and `sh tests/run.sh` runs the core tests.
 
 ```
-src/        Program.cs, Cli.cs, Installer.cs, Localization.cs
-src/Core/   paths, config, backup, sharing, process and sign-in logic (no UI)
+src/        Program.cs, Cli.cs, Localization.cs
+src/Core/   paths, config, backup, sharing, process, sign-in and agent-mode logic (no UI)
 src/Ui/     WinForms screens and controls
 tests/      core tests (Mono)
+installer/  MSI source (WiX) and license text
+.github/    build, test and release workflow
 assets/     app icon
 ```
 
 Translations live in `src/Localization.cs`: English text is the key, Turkish the value.
+
+### Installer and releases
+
+The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTogether.wxs`, as a per-user package. On every push, the [workflow](.github/workflows/build.yml) builds both executables, runs the core tests, builds the MSI, installs it, smoke-tests the installed CLI and app, uninstalls it and uploads the files as build artifacts. To build the MSI yourself (needs the .NET SDK):
+
+```bat
+dotnet tool install --global wix --version 5.0.2
+wix extension add --global WixToolset.UI.wixext/5.0.2
+build.cmd
+wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 -sice ICE38 -sice ICE64 -sice ICE91 ^
+  -d Version=1.1.0 -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
+  -o dist\ClaudeTogether-1.1.0.msi
+```
+
+To publish a release: set the same version in `src/Cli.cs` (`Version`) and `src/AssemblyInfo.cs`, commit, then push a tag such as `v1.1.0`. The workflow checks that the tag matches the version, then creates the GitHub Release with the MSI, the portable zip and checksums.
 
 ## Contributing
 

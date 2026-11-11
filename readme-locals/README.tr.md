@@ -16,8 +16,8 @@
 </div>
 
 > **Kullanım amacı**
-> Bu uygulama tamamen kişisel bilgisayarlarda farklı oturumlarda aynı anda insan girdileri ile çalışabilmek için tasarlanmıştır.
-> Kesinlikle uzaktan veya lokal üzerinden otomasyon amacı taşımamakta, dışarıya herhangi bir veri paylaşmamaktadır.
+> Claude Together, **kendi bilgisayarınızdaki kendi Claude hesaplarınız** içindir. Birden fazla hesabı yan yana çalıştırabilir, ortak ayarları paylaşabilir ve kendi işinizi bu hesaplar arasında elle ya da yönlendirdiğiniz bir yapay zekâ ajanıyla bölüp devredebilirsiniz.
+> Hesap satmak, kiralamak ya da paylaşmak veya başkalarına hesaplarınızda erişim vermek için **değildir**. Hiçbir veriyi dışarıya göndermez ve uzaktan erişim özelliği yoktur.
 
 ## Neden
 
@@ -31,8 +31,9 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 - **Adım adım ilk kurulum**: Yedekle → Dağıt → Çalıştır → Hazır. Hiçbir şey silinmez.
 - **Varsayılan olarak ortak**: ayarlar, `CLAUDE.md`, skill'ler, eklentiler, komutlar, ajanlar, hook'lar, geçmiş. Giriş bilgisi hesaba özel kalır.
 - **Komut satırı da var**: terminali sevenler için `claude-together list`, `open`, `login`, `run` ve daha fazlası.
+- **Ajan modu**: bir yapay zekâ ajanı diğer hesaplarınızı bulabilir (`scan`, `whoami`) ve birine görev devredebilir (`delegate`). Yalnızca yerelde. Bkz. [Hesaplar arasında çalışma](#hesaplar-arasında-çalışma).
 - **Güvenli**: her giriş geri alınabilir bir adımla sarılıdır. Yarım kalan işlem bir sonraki açılışta geri alınır.
-- **Kurulum gerektirmez**: iki küçük `.exe`. Yönetici hakkı yok, bağımlılık yok. Arayüz Türkçe ve İngilizce.
+- **Kolay kurulum**: tek bir MSI, yalnızca Windows kullanıcınız için kurulur. Yönetici hakkı yok, bağımlılık yok. Arayüz Türkçe ve İngilizce.
 
 <details>
 <summary>Kurulum sihirbazının ekran görüntüsü</summary>
@@ -42,9 +43,13 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 
 ## İndirme
 
-1. `ClaudeTogether.exe` ve `claude-together.exe` dosyalarını [Releases](https://github.com/RidvanGNC/claude-together/releases) sayfasından indirin ya da kendiniz derleyin ([Derleme](#derleme)).
-2. **`ClaudeTogether.exe`** dosyasına çift tıklayın. Windows SmartScreen bilinmeyen yayıncı uyarısı verirse **Ek bilgi → Yine de çalıştır** seçin.
-3. Terminal için isteğe bağlı: bir kez `claude-together install` çalıştırın. İki dosyayı `%LOCALAPPDATA%\Programs\ClaudeTogether` klasörüne kopyalar, bu klasörü kullanıcı `PATH`'inize ekler ve Başlat menüsüne kısayol koyar. Yönetici hakkı gerekmez.
+1. [Releases](https://github.com/RidvanGNC/claude-together/releases) sayfasından **`ClaudeTogether-<sürüm>.msi`** dosyasını indirin.
+2. Çift tıklayın. Windows SmartScreen bilinmeyen yayıncı uyarısı verirse **Ek bilgi → Yine de çalıştır** seçin.
+3. Başlat menüsünden **Claude Together**'ı açın. Yeni bir terminalde `claude-together` komutu da çalışır.
+
+Kurulum yönetici hakkı istemez. Kurulumu çalıştıran Windows kullanıcısı için `%LOCALAPPDATA%\Programs\ClaudeTogether` klasörüne kurulur, bu klasörü kullanıcı `PATH`'inize ekler ve Başlat menüsüne kısayol koyar. Güncellemek için yeni MSI'yı çalıştırın. Kaldırmak için **Ayarlar → Uygulamalar**'ı kullanın; hesaplarınıza ve Claude verilerinize dokunulmaz. Sessiz kurulum: `msiexec /i ClaudeTogether-<sürüm>.msi /qn`.
+
+Kurulum istemiyorsanız her sürümde iki `.exe` dosyasını içeren bir `-portable.zip` de var. Sağlama toplamları `SHA256SUMS.txt` dosyasındadır.
 
 ## Hızlı başlangıç (arayüz)
 
@@ -79,22 +84,66 @@ claude-together run work -- claude      :: bu terminalde "work" hesabıyla Claud
 | `close [<ad>...] [--all]` | Hesaplar için Claude Masaüstü'nü kapatır |
 | `run <ad> [-- <komut>]` | Komutu hesabın Claude Code yapılandırma klasörüyle çalıştırır (varsayılan komut: `claude`) |
 | `env <ad>` | Hesabın ortam değişkenlerini yazdırır (`--shell cmd\|powershell\|json`) |
+| `scan` | Bilgisayardaki hesapları bulur, kayıtlı olmayan klasörleri de gösterir |
+| `whoami` | Bu oturumun hangi hesapla çalıştığını ve devredip devredemeyeceğini gösterir |
+| `delegate <ad> [seçenekler]` | Başka bir hesapla tek bir başsız Claude Code oturumu çalıştırır ve sonucu bekler |
+| `skill install\|remove` | Ajan skill'ini ortak skill klasörüne ekler ya da kaldırır |
 | `backup` | Mevcut Claude verisini yedek klasörlere kopyalar |
 | `recover` | Yarım kalan girişin kenara aldığı veriyi geri koyar |
-| `install` / `uninstall` | Kullanıcı bazlı kurulum: PATH ve Başlat menüsü kısayolu |
 | `version`, `help` | |
 
 | Seçenek | Anlamı |
 | --- | --- |
 | `-y`, `--yes` | Onayları atlar (gerektiğinde Claude Masaüstü kapatılır) |
 | `--all` | Tüm hesaplara uygular (`open`, `close`) |
-| `--json` | `list` için JSON çıktısı |
+| `--json` | `list`, `scan`, `whoami` ve `delegate` için JSON çıktısı |
 | `--shell cmd\|powershell\|json` | `env` çıktı biçimi (varsayılan `cmd`) |
 | `--lang en\|tr` | Mesaj dili. Varsayılan: Windows görüntü dili ya da `CLAUDE_TOGETHER_LANG` değişkeni |
 
 Çıkış kodları: `0` tamam · `1` hata · `2` kullanım hatası · `3` işlem gerekli (örneğin bir hesabın giriş yapması gerekir).
 
 > Komut yardımı (`claude-together help`) İngilizcedir; çalışma sırasındaki mesajlar dil ayarını izler.
+
+## Hesaplar arasında çalışma
+
+Claude Code'un yerleşik alt ajanları her zaman mevcut oturumun hesabında çalışır. Görevi *başka* bir hesabınıza vermek için `claude-together`, o hesabın yapılandırma klasörüyle ayrı bir başsız Claude Code oturumu (`claude -p`) başlatır. Her şey bilgisayarınızda kalır.
+
+**1. Ajanın hesaplarınızı bulmasını sağlayın**
+
+```bat
+claude-together scan --json       :: bilgisayardaki hesaplar: kayıtlı mı, Claude Code ve Masaüstü girişi var mı
+claude-together whoami --json     :: bu oturum hangi hesapla çalışıyor, devredebilir mi
+claude-together skill install     :: ortak skill klasörüne ajan skill'i koyar, her hesabın ajanı yukarıdakileri bilir
+```
+
+`scan`, hesap gibi görünen ama kayıtlı olmayan klasörleri de listeler. Bunlar yalnızca ipucudur. Eklemek için `claude-together add <ad>` kullanın.
+
+**2. Görevi başka bir hesaba verin**
+
+```bat
+claude-together delegate personal --prompt-file brief.md --cwd C:\src\app --json
+claude-together delegate personal --prompt "Bu klasördeki diff'i incele" --max-turns 5
+claude-together delegate personal --prompt-file brief.md --allow-edits -- --model sonnet
+```
+
+| Seçenek | Anlamı |
+| --- | --- |
+| `--prompt <metin>` ya da `--prompt-file <dosya>` | Görev. `--prompt-file -` standart girdiyi okur |
+| `--cwd <klasör>` | Diğer oturumun çalışma klasörü (varsayılan: geçerli klasör) |
+| `--max-turns <n>` | Ajan tur sayısını sınırlar |
+| `--timeout <saniye>` | Oturumu bu süreden sonra durdurur (varsayılan 1800) |
+| `--allow-edits` | Diğer oturumun dosya düzenlemesine izin verir. Verilmezse oturum salt okunurdur |
+| `-- <seçenekler>` | Ek Claude Code seçenekleri, örneğin `-- --model sonnet --output-format json` |
+
+`--json` ile sonuç tek bir nesnedir: `account`, `exitCode`, `timedOut`, `seconds`, `output`, `error`. Olmadan oturumun çıktısı geldikçe gösterilir. `delegate` başarıda `0`, oturum başarısız olursa ya da zaman aşımına uğrarsa `1`, hedef hesabın Claude Code girişi yoksa `3` ile çıkar (`claude-together run <ad>` çalıştırıp `/login` kullanın).
+
+Bilinmesi gerekenler:
+
+- Diğer oturum konuşmanızın hiçbirini görmez, bu yüzden görev eksiksiz olmalı: amaç, klasör, dosyalar, beklenen sonuç.
+- Dosya düzenleyecekse ona ayrı bir git worktree ya da klasör verin. Aynı klasördeki iki oturum birbirinin üzerine yazar.
+- Tek seviye: devredilmiş bir oturum tekrar devredemez.
+- Hedef kendi girişiyle çalışır. `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` ve `CLAUDE_CODE_OAUTH_TOKEN` ortamından çıkarılır; ilk hesap için tanımlı bir değişken devralamaz.
+- Yalnızca kendi hesaplarınız için ve onlara uygulanan koşullar içinde ([Sınırlamalar](#sınırlamalar)).
 
 ## Nasıl çalışır
 
@@ -116,6 +165,7 @@ claude-together run work -- claude      :: bu terminalde "work" hesabıyla Claud
 - Yalnızca Windows 10/11. Claude Masaüstü uygulaması gerekir. macOS ve Linux denenmedi (aşağıya bakın: [macOS ve Linux](#macos-ve-linux-denenmedi-destek-bekliyoruz)).
 - Tüm Claude pencereleri görev çubuğunda aynı ad ve simgeyle görünür.
 - Cowork'ün sanal makinesi aynı anda tek pencerede çalışır.
+- `delegate` yalnızca Claude Code ile çalışır (Claude Masaüstü ya da Cowork ile değil) ve hedef hesabın kendi Claude Code girişi olmalıdır.
 - Giriş için tarayıcıda claude.ai, eklediğiniz hesapla açık olmalıdır. "Yanlış hesap" sorununun olağan nedeni, tarayıcıda önce başka hesaba giriş yapmış olmaktır.
 - Giriş yaparken ya da oturum yenilerken tüm Claude Masaüstü pencereleri kısa süre kapanır.
 - Resmî değildir. Anthropic ile bağlantılı değildir ve onun onayını taşımaz; "Claude" Anthropic'in ticari markasıdır. Birden fazla hesap kullanımı hesaplarınız için geçerli koşullara uymalıdır. Bu sizin sorumluluğunuzdadır.
@@ -124,15 +174,15 @@ claude-together run work -- claude      :: bu terminalde "work" hesabıyla Claud
 
 Claude Together yalnızca Windows 10/11 üzerinde yazıldı ve denendi. macOS'ta ya da herhangi bir Linux kabuğunda **denemedik**; bu alanda destek arıyoruz.
 
-- Windows'a özgü parçalar (WMI ile süreç tespiti, `mklink` bağlantıları, robocopy, Appx sorgusu, `install` adımı) bu sistemlerde olduğu gibi çalışmaz.
+- Windows'a özgü parçalar (WMI ile süreç tespiti, `mklink` bağlantıları, robocopy, Appx sorgusu, MSI kurulumu) bu sistemlerde olduğu gibi çalışmaz.
 - Temel fikirler (`CLAUDE_CONFIG_DIR`, `--user-data-dir`, giriş istasyonu) taşınabilir, yani bir port mümkün görünüyor. macOS'ta kimlik bilgisi saklama farklıdır; bunun ayrıca kontrol edilmesi gerekir.
 - Derleme ve çekirdek testler Linux'ta Mono ile çalışır, ama yalnızca dosya mantığını sahte bir kabukla sınar. Uygulamanın kendisi orada çalıştırılmadı.
 
-macOS ya da Linux kullanıyorsanız denemenize ve gördüklerinizi bir issue olarak yazmanıza, ya da pull request göndermenize bekleriz. Her port için aynı kullanım amacı geçerlidir: kişisel bilgisayarlar, insan girdisi, otomasyon yok.
+macOS ya da Linux kullanıyorsanız denemenize ve gördüklerinizi bir issue olarak yazmanıza, ya da pull request göndermenize bekleriz. Her port için aynı kullanım amacı geçerlidir: kendi bilgisayarınızdaki kendi hesaplarınız.
 
 ## Gizlilik
 
-Her şey bilgisayarınızda kalır. Kodda ağ erişimi yoktur. Yukarıdaki klasörleri okur ve yazar, yerel bir günlük tutar: `%APPDATA%\claude-together\app.log`. Claude Masaüstü'nü başlatmak için kurulum klasörünü yerel bir PowerShell sorgusuyla (`Get-AppxPackage`) bulur.
+Her şey bilgisayarınızda kalır. Kodda ağ erişimi yoktur; `delegate` yalnızca yerel `claude` programını başlatır, o da Anthropic ile her zamanki gibi konuşur. Yukarıdaki klasörleri okur ve yazar, yerel bir günlük tutar: `%APPDATA%\claude-together\app.log`. Claude Masaüstü'nü başlatmak için kurulum klasörünü yerel bir PowerShell sorgusuyla (`Get-AppxPackage`) bulur.
 
 ## Derleme
 
@@ -145,14 +195,31 @@ build.cmd
 Aynı kaynaklardan `bin\ClaudeTogether.exe` (pencereli) ve `bin\claude-together.exe` (konsol) üretilir. Linux ya da macOS'ta Mono ile `sh build.sh` aynı dosyaları derler, `sh tests/run.sh` çekirdek testlerini çalıştırır.
 
 ```
-src/        Program.cs, Cli.cs, Installer.cs, Localization.cs
-src/Core/   yollar, yapılandırma, yedek, paylaşım, süreç ve giriş mantığı (arayüzsüz)
+src/        Program.cs, Cli.cs, Localization.cs
+src/Core/   yollar, yapılandırma, yedek, paylaşım, süreç, giriş ve ajan modu mantığı (arayüzsüz)
 src/Ui/     WinForms ekranları ve denetimleri
 tests/      çekirdek testleri (Mono)
+installer/  MSI kaynağı (WiX) ve lisans metni
+.github/    derleme, test ve sürüm iş akışı
 assets/     uygulama simgesi
 ```
 
 Çeviriler `src/Localization.cs` içindedir: anahtar İngilizce metin, değer Türkçesidir.
+
+### Kurucu ve sürümler
+
+MSI, `installer/ClaudeTogether.wxs` dosyasından [WiX](https://wixtoolset.org) v5 ile, kullanıcı bazlı bir paket olarak üretilir. Her push'ta [iş akışı](../.github/workflows/build.yml) iki exe'yi derler, çekirdek testleri çalıştırır, MSI'yı üretir, kurar, kurulu CLI ve uygulamayı duman testinden geçirir, kaldırır ve dosyaları derleme çıktısı olarak yükler. MSI'yı kendiniz üretmek için (.NET SDK gerekir):
+
+```bat
+dotnet tool install --global wix --version 5.0.2
+wix extension add --global WixToolset.UI.wixext/5.0.2
+build.cmd
+wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 -sice ICE38 -sice ICE64 -sice ICE91 ^
+  -d Version=1.1.0 -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
+  -o dist\ClaudeTogether-1.1.0.msi
+```
+
+Sürüm yayınlamak için aynı sürümü `src/Cli.cs` (`Version`) ve `src/AssemblyInfo.cs` içinde ayarlayın, commit'leyin, sonra `v1.1.0` gibi bir etiket gönderin. İş akışı etiketin sürümle eşleştiğini denetler, sonra MSI, taşınabilir zip ve sağlama toplamlarıyla GitHub Release oluşturur.
 
 ## Katkı
 
