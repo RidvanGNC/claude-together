@@ -66,7 +66,27 @@ namespace ClaudeTogether
             return ManualCopy(from, to, skipDirs, log);
         }
 
-        static int ManualCopy(string from, string to, string[] skipDirs, Action<string> log)
+        /// <summary>
+        /// Copies only the files the destination does not have yet. A file that exists on both sides is never
+        /// touched, whatever its date or size. Returns the number of files that could not be copied.
+        /// </summary>
+        public static int CopyMissing(string from, string to, Action<string> log)
+        {
+            if (!Directory.Exists(from)) return 0;
+            Directory.CreateDirectory(to);
+            if (Win.IsWindows)
+            {
+                // /XC /XN /XO together skip every file that already exists in the destination.
+                string args = "\"" + from.TrimEnd('\\') + "\" \"" + to.TrimEnd('\\') + "\" /E /XC /XN /XO /COPY:DAT /DCOPY:DAT /R:1 /W:1 /NFL /NDL /NJH /NJS /NP";
+                string output;
+                int code = RunCode("robocopy.exe", args, 60 * 60 * 1000, out output);
+                if (code >= 0 && code < 8) return 0;
+                Log("robocopy failed (" + code + "), falling back to manual copy: " + from);
+            }
+            return ManualCopy(from, to, null, log, true);
+        }
+
+        static int ManualCopy(string from, string to, string[] skipDirs, Action<string> log, bool onlyMissing = false)
         {
             int failed = 0;
             Directory.CreateDirectory(to);
@@ -75,7 +95,7 @@ namespace ClaudeTogether
                 try
                 {
                     string d = Path.Combine(to, Path.GetFileName(f));
-                    if (!File.Exists(d) || File.GetLastWriteTimeUtc(f) > File.GetLastWriteTimeUtc(d)) File.Copy(f, d, true);
+                    if (!File.Exists(d) || (!onlyMissing && File.GetLastWriteTimeUtc(f) > File.GetLastWriteTimeUtc(d))) File.Copy(f, d, true);
                 }
                 catch (Exception ex) { failed++; Log("Copy failed: " + f + " : " + ex.Message); }
             }
@@ -84,7 +104,7 @@ namespace ClaudeTogether
                 string n = Path.GetFileName(s);
                 if (skipDirs != null && skipDirs.Contains(n, StringComparer.OrdinalIgnoreCase)) continue;
                 if (IsLink(s)) continue;
-                failed += ManualCopy(s, Path.Combine(to, n), skipDirs, log);
+                failed += ManualCopy(s, Path.Combine(to, n), skipDirs, log, onlyMissing);
             }
             if (failed > 0 && log != null) log(Loc.T("Warning: {0} files could not be copied (see the log).", failed));
             return failed;

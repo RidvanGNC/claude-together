@@ -156,6 +156,7 @@ Good to know:
 
 - **Separate windows.** Claude Desktop is an Electron app. A second window with its own sign-in is started with `--user-data-dir`, and every account's Claude Code uses its own `CLAUDE_CONFIG_DIR`.
 - **Sharing.** Folders are shared with directory junctions, files with symbolic links (hard links or copies as fallback). No admin rights are needed; Windows Developer Mode makes file links more reliable.
+- **The default folder is shared too.** A Claude that you start without Claude Together has no account folder and uses `%USERPROFILE%\.claude`. That folder's shared parts are linked to the same shared folder, so its chats are written to the shared place and every account finds them. What was in it is merged first: only files the shared folder lacks are copied, nothing is overwritten, and the old folder stays beside it as `.pre-share-…`. This runs at setup and when you open an account, never while Claude Desktop is running.
 - **Why a "login station"?** After you sign in in the browser, Claude opens through a `claude://` link, and Windows always hands that link to the *normal* Claude window. A second window therefore cannot finish a sign-in itself. To work around this, Claude Together parks the normal data folder, opens a clean Claude, lets you sign in, copies the result to the account's own folder and puts the parked data back. If the app is interrupted in between, the next start restores everything.
 - **Your data is never deleted.** Folders set aside get a suffix: `.backup-…`, `.old-…`, `.parked-…`, `.station-…`, `.pre-share-…`; the full backup is `%USERPROFILE%\claude-backup-<time>`. Delete them yourself once you are happy.
 
@@ -207,15 +208,15 @@ Translations live in `src/Localization.cs`: English text is the key, Turkish the
 
 ### Installer and releases
 
-The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTogether.wxs`, as a per-user package. On every push, the [workflow](.github/workflows/build.yml) builds both executables, runs the core tests, builds the MSI, installs it, smoke-tests the installed CLI and app, uninstalls it, tests `install` and `uninstall` from the portable files and uploads the files as build artifacts. To build the MSI yourself (needs the .NET SDK):
+The MSI is built with [WiX](https://wixtoolset.org) v5 from `installer/ClaudeTogether.wxs`, as a per-user package. On every push, the [workflow](.github/workflows/build.yml) builds both executables, runs the core tests, builds the MSI, installs it, smoke-tests the installed CLI and app, uninstalls it, tests `install` and `uninstall` from the portable files and uploads the files as build artifacts. To build the MSI yourself (needs the .NET SDK; use the `Version` from `src/Cli.cs` for `<version>`):
 
 ```bat
 dotnet tool install --global wix --version 5.0.2
 wix extension add --global WixToolset.UI.wixext/5.0.2
 build.cmd
 wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 ^
-  -d Version=1.1.0 -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
-  -o dist\ClaudeTogether-1.1.0.msi
+  -d Version=<version> -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
+  -o dist\ClaudeTogether-<version>.msi
 ```
 
 To publish a release: raise `Version` in `src/Cli.cs` (the only place the version is written; the executables and the MSI take it from there), commit and push to `main`. When the build is green and no tag `v<version>` exists yet, the workflow creates that tag on the tested commit and the GitHub Release with the MSI, the portable zip and checksums. Pushes that keep the same version publish nothing. Pushing a tag by hand still works; the workflow checks that it matches the version.

@@ -162,6 +162,9 @@ jobs:
 
           $link = Get-Item (Join-Path $env:USERPROFILE '.claude-work\projects')
           if ($link.LinkType -ne 'Junction') { throw "projects is not a junction (LinkType '$($link.LinkType)')" }
+          # A Claude started without Claude Together uses ~/.claude, which must share the store too
+          $default = Get-Item (Join-Path $env:USERPROFILE '.claude\projects')
+          if ($default.LinkType -ne 'Junction' -or $default.Target -notmatch '\.claude-shared\\projects') { throw "the default .claude\projects is not linked to the shared folder (LinkType '$($default.LinkType)', Target '$($default.Target)')" }
 
           Invoke-Cli 0 @('skill', 'install') | Out-Null
           if (-not (Test-Path (Join-Path $env:USERPROFILE '.claude-personal\skills\claude-together\SKILL.md'))) { throw "Skill is not visible from the second profile" }

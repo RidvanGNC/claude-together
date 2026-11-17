@@ -158,6 +158,7 @@ Bilinmesi gerekenler:
 
 - **Ayrı pencereler.** Claude Masaüstü bir Electron uygulamasıdır. Kendi girişi olan ikinci pencere `--user-data-dir` ile başlatılır; her hesabın Claude Code'u kendi `CLAUDE_CONFIG_DIR` klasörünü kullanır.
 - **Paylaşım.** Klasörler dizin bağlantısıyla (junction), dosyalar sembolik bağlantıyla paylaşılır (olmazsa sabit bağlantı ya da kopya). Yönetici hakkı gerekmez; Windows Geliştirici Modu dosya bağlantılarını daha güvenilir yapar.
+- **Varsayılan klasör de paylaşılır.** Claude Together olmadan açtığınız bir Claude'un hesap klasörü yoktur, `%USERPROFILE%\.claude` klasörünü kullanır. Bu klasörün ortak parçaları da aynı ortak klasöre bağlanır; böylece sohbetleri ortak yere yazılır ve her hesap onları bulur. İçindekiler önce birleştirilir: yalnızca ortak klasörde olmayan dosyalar kopyalanır, hiçbir şeyin üzerine yazılmaz ve eski klasör `.pre-share-…` soneğiyle yanında kalır. Bu, kurulumda ve bir hesabı açarken, Claude Masaüstü çalışmıyorken yapılır.
 - **"Giriş istasyonu" neden var?** Tarayıcıda giriş yaptıktan sonra Claude bir `claude://` bağlantısıyla açılır ve Windows bu bağlantıyı her zaman *normal* Claude penceresine verir. İkinci pencere girişi kendi başına tamamlayamaz. Claude Together bunu şöyle aşar: normal veri klasörünü kenara alır, temiz bir Claude açar, girişi yapmanızı bekler, sonucu hesabın kendi klasörüne kopyalar ve kenara alınan veriyi geri koyar. Arada yarıda kalırsa bir sonraki açılış her şeyi geri yükler.
 - **Verileriniz asla silinmez.** Kenara alınan klasörler sonek alır: `.backup-…`, `.old-…`, `.parked-…`, `.station-…`, `.pre-share-…`. Tam yedek `%USERPROFILE%\claude-backup-<zaman>` klasörüdür. Memnun kalınca kendiniz silebilirsiniz.
 
@@ -209,15 +210,15 @@ assets/     uygulama simgesi
 
 ### Kurucu ve sürümler
 
-MSI, `installer/ClaudeTogether.wxs` dosyasından [WiX](https://wixtoolset.org) v5 ile, kullanıcı bazlı bir paket olarak üretilir. Her push'ta [iş akışı](../.github/workflows/build.yml) iki exe'yi derler, çekirdek testleri çalıştırır, MSI'yı üretir, kurar, kurulu CLI ve uygulamayı duman testinden geçirir, kaldırır, taşınabilir dosyalarla `install` ve `uninstall` komutlarını sınar ve dosyaları derleme çıktısı olarak yükler. MSI'yı kendiniz üretmek için (.NET SDK gerekir):
+MSI, `installer/ClaudeTogether.wxs` dosyasından [WiX](https://wixtoolset.org) v5 ile, kullanıcı bazlı bir paket olarak üretilir. Her push'ta [iş akışı](../.github/workflows/build.yml) iki exe'yi derler, çekirdek testleri çalıştırır, MSI'yı üretir, kurar, kurulu CLI ve uygulamayı duman testinden geçirir, kaldırır, taşınabilir dosyalarla `install` ve `uninstall` komutlarını sınar ve dosyaları derleme çıktısı olarak yükler. MSI'yı kendiniz üretmek için (.NET SDK gerekir; `<sürüm>` yerine `src/Cli.cs` içindeki `Version` değerini yazın):
 
 ```bat
 dotnet tool install --global wix --version 5.0.2
 wix extension add --global WixToolset.UI.wixext/5.0.2
 build.cmd
 wix build installer\ClaudeTogether.wxs -ext WixToolset.UI.wixext -arch x64 ^
-  -d Version=1.1.0 -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
-  -o dist\ClaudeTogether-1.1.0.msi
+  -d Version=<sürüm> -d BinDir=bin -d IconFile=assets\app.ico -d LicenseFile=installer\license.rtf -d LicenseText=LICENSE ^
+  -o dist\ClaudeTogether-<sürüm>.msi
 ```
 
 Sürüm yayınlamak için `src/Cli.cs` içindeki `Version` değerini artırın (sürüm yalnızca burada yazılır; exe'ler ve MSI sürümü buradan alır), commit'leyip `main`'e gönderin. Derleme yeşil olduğunda ve `v<sürüm>` etiketi henüz yoksa iş akışı bu etiketi test edilen commit üzerinde, ardından MSI, taşınabilir zip ve sağlama toplamlarıyla GitHub Release'i kendisi oluşturur. Sürümü değişmeyen push'lar bir şey yayınlamaz. Etiketi elle göndermek de çalışır; iş akışı etiketin sürümle eşleştiğini denetler.

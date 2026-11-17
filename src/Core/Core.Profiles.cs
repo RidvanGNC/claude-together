@@ -37,6 +37,13 @@ namespace ClaudeTogether
             catch (Exception ex) { Log("Could not edit " + jsonPath + ": " + ex.Message); }
         }
 
+        static void MakeJunction(string link, string dest, string item)
+        {
+            string output;
+            if (!Run("cmd.exe", "/c mklink /J \"" + link + "\" \"" + dest + "\"", 20000, out output))
+                throw new InvalidOperationException(Loc.T("Could not create link for {0}: {1}", item, output.Trim()));
+        }
+
         /// <summary>Replaces an item in a profile with a link to the shared store. Existing content is merged first and kept aside.</summary>
         static void LinkShared(string profile, string item, bool isDir, string stamp, Action<string> log)
         {
@@ -61,9 +68,7 @@ namespace ClaudeTogether
 
             if (isDir)
             {
-                string output;
-                if (!Run("cmd.exe", "/c mklink /J \"" + link + "\" \"" + dest + "\"", 20000, out output))
-                    throw new InvalidOperationException(Loc.T("Could not create link for {0}: {1}", item, output.Trim()));
+                MakeJunction(link, dest, item);
                 log(Loc.T("  {0} (folder link)", item));
                 return;
             }
@@ -118,6 +123,72 @@ namespace ClaudeTogether
             foreach (string f in SharedFiles) LinkShared(target, f, false, stamp, log);
         }
 
+        static string UniqueAside(string path, string stamp)
+        {
+            string name = path + ".pre-share-" + stamp;
+            for (int n = 2; Directory.Exists(name) || File.Exists(name); n++) name = path + ".pre-share-" + stamp + "-" + n;
+            return name;
+        }
+
+        /// <summary>
+        /// Makes the default Claude Code folder (~/.claude) use the shared store too. A Claude that is started
+        /// outside Claude Together has no CLAUDE_CONFIG_DIR and writes its chats there; without this link the
+        /// accounts could not find them ("not found on disk"). Each folder is merged first with only the files the
+        /// store lacks (nothing is overwritten) and the old folder is kept aside, never deleted.
+        /// Does nothing before the first setup, for folders that are already links, and while Claude Desktop runs
+        /// (its files may be in use). A folder that cannot be moved is left alone and retried next time.
+        /// Returns the number of folders linked now.
+        /// </summary>
+        public static int EnsureDefaultShared(Action<string> log)
+        {
+            if (PendingDefault().Count == 0 || DesktopProcs().Count > 0) return 0;
+            return LinkDefaultFolders(log);
+        }
+
+        /// <summary>Shared folders that exist in the store but are not yet linked from ~/.claude.</summary>
+        static List<string> PendingDefault()
+        {
+            return SharedDirs.Where(d => Directory.Exists(Path.Combine(Paths.Store, d)) && !IsLink(Path.Combine(Paths.SrcDir, d))).ToList();
+        }
+
+        /// <summary>The work of <see cref="EnsureDefaultShared"/>, without the check for a running Claude Desktop.</summary>
+        public static int LinkDefaultFolders(Action<string> log)
+        {
+            List<string> pending = PendingDefault();
+            if (pending.Count == 0) return 0;
+
+            log(Loc.T("The default Claude Code folder (.claude) now uses the shared folder too:"));
+            string stamp = Stamp();
+            int done = 0;
+            foreach (string item in pending)
+            {
+                string link = Path.Combine(Paths.SrcDir, item);
+                string dest = Path.Combine(Paths.Store, item);
+                try
+                {
+                    if (Directory.Exists(link))
+                    {
+                        if (CopyMissing(link, dest, log) > 0)
+                            throw new IOException(Loc.T("Some files could not be copied; {0} was left as it is.", item));
+                        string aside = UniqueAside(link, stamp);
+                        Directory.Move(link, aside);
+                        try { MakeJunction(link, dest, item); }
+                        catch (Exception) { Directory.Move(aside, link); throw; }
+                        log(Loc.T("  {0}: previous copy set aside as {1}", item, Path.GetFileName(aside)));
+                    }
+                    else
+                    {
+                        Directory.CreateDirectory(Paths.SrcDir);
+                        MakeJunction(link, dest, item);
+                    }
+                    log(Loc.T("  {0} (folder link)", item));
+                    done++;
+                }
+                catch (Exception ex) { Log("Default folder not linked (" + item + "): " + ex.Message); }
+            }
+            return done;
+        }
+
         /// <summary>Copies the current Claude data to backup folders. Nothing is moved or deleted.</summary>
         public static string Backup(Action<string> log)
         {
@@ -159,7 +230,7 @@ namespace ClaudeTogether
             {
                 string s = Path.Combine(Paths.SrcDir, d);
                 string t = Path.Combine(Paths.Store, d);
-                if (Directory.Exists(s)) CopyTree(s, t, null, log); else Directory.CreateDirectory(t);
+                if (Directory.Exists(s) && !IsLink(s)) CopyTree(s, t, null, log); else Directory.CreateDirectory(t);
             }
             foreach (string f in SharedFiles)
             {
@@ -169,6 +240,7 @@ namespace ClaudeTogether
             }
             for (int i = 0; i < cfg.Accounts.Count; i++)
                 InitProfile(cfg.Accounts[i].Name, i < 2, cfg.Accounts[i].Primary, log);
+            EnsureDefaultShared(log);
             log(Loc.T("Distribution complete."));
         }
 

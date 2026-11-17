@@ -135,6 +135,9 @@ namespace ClaudeTogether
         /// <summary>Starts (or focuses) Claude Desktop for an account and waits until its process shows up.</summary>
         public static bool StartDesktop(Account a)
         {
+            // Claude started without Claude Together uses ~/.claude: make sure that folder shares the store too.
+            try { EnsureDefaultShared(Log); }
+            catch (Exception ex) { Log("Could not link the default folder: " + ex.Message); }
             Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Paths.ProfileDir(a.Name));
             foreach (string exe in Exes())
             {

@@ -123,11 +123,19 @@ namespace ClaudeTogether
 
         void SetStatus(string s) { lblStatus.Text = s; }
 
+        /// <summary>Shows or hides the spinner; the status text moves right of it so the two never overlap.</summary>
+        void SetBusy(bool on)
+        {
+            busy.Visible = on;
+            if (on) busy.Start(); else busy.Stop();
+            int left = on ? busy.Right + Theme.S(10) : Theme.S(32);
+            lblStatus.SetBounds(left, Theme.S(13), Theme.S(700), Theme.S(22));
+        }
+
         void Work(string status, Func<string> job)
         {
             working++;
-            busy.Visible = true;
-            busy.Start();
+            SetBusy(true);
             SetStatus(status);
             Task.Factory.StartNew(delegate
             {
@@ -138,7 +146,7 @@ namespace ClaudeTogether
                 {
                     if (IsDisposed) return;
                     working--;
-                    if (working <= 0) { working = 0; busy.Stop(); busy.Visible = false; }
+                    if (working <= 0) { working = 0; SetBusy(false); }
                     SetStatus(res ?? "");
                     Poll();
                 });

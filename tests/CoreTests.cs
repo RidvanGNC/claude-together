@@ -93,6 +93,26 @@ static class CoreTests
         Check(note != null && File.Exists(P(Paths.DefaultData, "claude-code-sessions", "u", "s.json")) && !File.Exists(Paths.LockFile)
               && Directory.GetDirectories(Paths.Roaming, "Claude.station-*").Length == 1, "interrupted sign-in is rolled back");
 
+        // ---- the default ~/.claude shares the store too, so a Claude started outside the tool cannot diverge ----
+        string defProj = P(Paths.SrcDir, "projects"), storeProj = P(Paths.Store, "projects");
+        Check(Core.IsLink(defProj) && File.Exists(P(defProj, "p1", "t.jsonl")), "Distribute links the default ~/.claude/projects to the store");
+        Check(Directory.GetDirectories(Paths.SrcDir, "projects.pre-share-*").Length == 1 && File.Exists(P(Paths.Store, "projects", "p1", "t.jsonl")), "the old default folder is kept aside, its content merged into the store");
+
+        // a Claude started without CLAUDE_CONFIG_DIR wrote into a real ~/.claude/projects again
+        System.Diagnostics.Process.Start("rm", "\"" + defProj + "\"").WaitForExit();
+        Directory.CreateDirectory(P(defProj, "pX"));
+        File.WriteAllText(P(defProj, "pX", "new.jsonl"), "only in default");
+        File.WriteAllText(P(defProj, "pX", "both.jsonl"), "default version");
+        Directory.CreateDirectory(P(storeProj, "pX"));
+        File.WriteAllText(P(storeProj, "pX", "both.jsonl"), "store version, longer");
+        File.SetLastWriteTimeUtc(P(storeProj, "pX", "both.jsonl"), DateTime.UtcNow.AddDays(-5));   // older than the default copy
+        Check(Core.EnsureDefaultShared(log) == 1 && Core.IsLink(defProj), "EnsureDefaultShared links a folder that diverged");
+        Check(File.ReadAllText(P(storeProj, "pX", "new.jsonl")) == "only in default", "a chat only in the default folder is merged into the store");
+        Check(File.ReadAllText(P(storeProj, "pX", "both.jsonl")) == "store version, longer", "a file that exists on both sides is never overwritten, even when the default one is newer");
+        string[] asides = Directory.GetDirectories(Paths.SrcDir, "projects.pre-share-*");
+        Check(asides.Length == 2 && asides.Any(x => File.Exists(P(x, "pX", "both.jsonl")) && File.ReadAllText(P(x, "pX", "both.jsonl")) == "default version"), "the default version stays in the set-aside folder; two set-asides in one second get different names");
+        Check(Core.EnsureDefaultShared(log) == 0 && Directory.GetDirectories(Paths.SrcDir, "projects.pre-share-*").Length == 2, "second run changes nothing");
+
         // ---- agent mode: scan, current account, skill, delegate ----
         Config cfgA = Core.Load();
         cfgA.Accounts.Clear();

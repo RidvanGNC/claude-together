@@ -85,6 +85,7 @@ Log file: `%APPDATA%\claude-together\app.log`.
 - Claude Code: `CLAUDE_CONFIG_DIR=%USERPROFILE%\.claude-<name>`.
 - Claude Desktop: `--user-data-dir=%APPDATA%\Claude-<name>` (the primary account keeps `%APPDATA%\Claude`).
 - Shared data lives in `%USERPROFILE%\.claude-shared` and is linked into each account folder (junctions for folders, symlinks for files).
+- **The default folder shares too:** `Core.EnsureDefaultShared` links the shared folders of `%USERPROFILE%\.claude` to the store (at `Distribute` and in `StartDesktop`, never while Claude Desktop runs). A Claude started outside the tool has no `CLAUDE_CONFIG_DIR` and would otherwise write chats where the accounts cannot find them ("not found on disk"). Existing content is merged with `CopyMissing` (files the store lacks only, never an overwrite) and the old folder is kept as `.pre-share-<stamp>`. Keep it that way: never overwrite a store file with a default-folder one.
 - **Login station:** the `claude://` callback always opens the normal Claude instance. For a non-primary account the tool parks `%APPDATA%\Claude`, starts a clean Claude, waits for the user to sign in and quit, copies the result to `Claude-<name>`, and restores the parked data. `RecoverStation()` undoes an interrupted station.
 
 ## Integrating into your own project

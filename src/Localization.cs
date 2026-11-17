@@ -190,6 +190,8 @@ namespace ClaudeTogether
             { "The prompt is empty.", "Görev metni boş." },
             { "The skill is not installed.", "Skill kurulu değil." },
             { "Added to PATH: {0}", "PATH'e eklendi: {0}" },
+            { "Some files could not be copied; {0} was left as it is.", "Bazı dosyalar kopyalanamadı; {0} olduğu gibi bırakıldı." },
+            { "The default Claude Code folder (.claude) now uses the shared folder too:", "Varsayılan Claude Code klasörü (.claude) da artık ortak klasörü kullanıyor:" },
             { "Claude Together was installed with the MSI package. Update it with a newer MSI, or remove it in Settings > Apps.", "Claude Together MSI paketiyle kurulmuş. Güncellemek için yeni MSI'yı çalıştırın, kaldırmak için Ayarlar > Uygulamalar'ı kullanın." },
             { "Files were left in place; delete this folder to finish: {0}", "Dosyalar yerinde bırakıldı; bitirmek için bu klasörü silin: {0}" },
             { "Removed from PATH: {0}", "PATH'ten kaldırıldı: {0}" },
