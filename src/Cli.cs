@@ -11,7 +11,7 @@ namespace ClaudeTogether
     /// <summary>Command line front end: claude-together &lt;command&gt; [options].</summary>
     static class Cli
     {
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         const int ExitOk = 0;
         const int ExitError = 1;
