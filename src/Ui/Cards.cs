@@ -56,11 +56,17 @@ namespace ClaudeTogether
             Invalidate();
         }
 
+        // Control.Visible is false while the card's parent is hidden (the classic view hides its panel), so the layout
+        // keeps its own flag instead of reading Secondary.Visible.
+        bool showClose;
+
         void Apply()
         {
-            if (State == CardState.Running) { Primary.Text = Loc.T("Show"); Secondary.Visible = true; }
-            else if (State == CardState.NeedLogin) { Primary.Text = Loc.T("Sign in"); Secondary.Visible = false; }
-            else { Primary.Text = Loc.T("Open"); Secondary.Visible = false; }
+            showClose = State == CardState.Running;
+            Secondary.Visible = showClose;
+            if (State == CardState.Running) Primary.Text = Loc.T("Show");
+            else if (State == CardState.NeedLogin) Primary.Text = Loc.T("Sign in");
+            else Primary.Text = Loc.T("Open");
             Primary.Glyph = State == CardState.Ready ? GlyphKind.Play : GlyphKind.None;
             LayoutKids();
         }
@@ -71,7 +77,7 @@ namespace ClaudeTogether
             More.Location = new Point(Width - pad - More.Width + Theme.S(6), Theme.S(18));
             int y = Height - pad - bh;
             int full = Width - 2 * pad;
-            if (Secondary.Visible)
+            if (showClose)
             {
                 int half = (full - gap) / 2;
                 Primary.SetBounds(pad, y, half, bh);

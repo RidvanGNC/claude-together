@@ -182,6 +182,35 @@ static class CoreTests
         catch (InvalidOperationException) { Check(true, "delegate: a delegated session cannot delegate again"); }
         Environment.SetEnvironmentVariable("CLAUDE_TOGETHER_DEPTH", null);
 
+        // ---- the office the player decorates is saved as office.json ----
+        Check(!File.Exists(Paths.OfficeFile) && Core.LoadOffice().ToJson() == OfficeState.Default().ToJson(), "office file: none yet gives the default office");
+        OfficeState os = OfficeState.Default();
+        os.Floor = "tiles"; os.Wallpaper = "sage"; os.Desks[0].Account = "one"; os.Items.RemoveAt(2);
+        Core.SaveOffice(os);
+        Check(File.Exists(Paths.OfficeFile) && !File.Exists(Paths.OfficeFile + ".tmp") && Core.LoadOffice().ToJson() == os.ToJson(), "office file: saved to office.json and read back, no temporary file left");
+        File.WriteAllText(Paths.OfficeFile, "{ this is broken");
+        Check(Core.LoadOffice().ToJson() == OfficeState.Default().ToJson(), "office file: a damaged office.json gives the default office and no crash");
+        File.Delete(Paths.OfficeFile);
+
+        // ---- what an account is doing: Claude Code keeps sessions\<pid>.json in the account's config folder ----
+        int sp; string sst;
+        Check(Core.ParseSession("{\"pid\":4242,\"status\":\"busy\",\"cwd\":\"x\"}", out sp, out sst) && sp == 4242 && sst == "busy", "sessions: pid and status are read from a session file");
+        Check(!Core.ParseSession("{ broken", out sp, out sst) && !Core.ParseSession("{\"status\":\"busy\"}", out sp, out sst) && !Core.ParseSession("[]", out sp, out sst), "sessions: damaged or unexpected files are ignored");
+        string codeDir = P(Paths.Home, "presence-test");
+        string sessDir = P(codeDir, "sessions");
+        Directory.CreateDirectory(sessDir);
+        File.WriteAllText(P(sessDir, "100.json"), "{\"pid\":100,\"status\":\"idle\"}");
+        File.WriteAllText(P(sessDir, "200.json"), "{\"pid\":200,\"status\":\"busy\"}");
+        Func<int, bool> everyoneAlive = delegate { return true; };
+        Func<int, bool> only100 = delegate(int pid) { return pid == 100; };
+        Func<int, bool> nobody = delegate { return false; };
+        Check(Core.PresenceOf(codeDir, false, everyoneAlive) == Presence.Busy, "presence: a live busy session means busy");
+        Check(Core.PresenceOf(codeDir, false, only100) == Presence.Idle && Core.PresenceOf(codeDir, true, nobody) == Presence.Idle, "presence: a live idle session, or Claude Desktop open, means idle (a session whose process is gone does not count)");
+        Check(Core.PresenceOf(codeDir, false, nobody) == Presence.Away && Core.PresenceOf(P(codeDir, "none"), false, everyoneAlive) == Presence.Away, "presence: nothing open means away; a missing folder is fine");
+        Directory.Delete(codeDir, true);
+
+        FloorTests.Run(Check);
+
         Console.WriteLine(failures == 0 ? "ALL PASS" : "FAILURES: " + failures);
         return failures == 0 ? 0 : 1;
     }

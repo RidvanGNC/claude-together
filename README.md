@@ -27,6 +27,10 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 
 ## Features
 
+- **A pixel office as the home screen.** Every account has its own desk on a small office floor with a kitchen, toilets and a game room. Click a desk to open its account, right-click for its menu, click an empty desk (small **+**) to add an account at it. The header (logo, status, **Run all**, the menu, **Classic view**, **Decorate**) is drawn in the same pixel art right above the office, and the walls grow to fill the window. The classic cards are one click away, and they take over when the window is too small.
+- **A living office.** The windows show the street at the real time of day (dawn, evening and night too) with cars and passers-by, the clocks show the real time, doors open when somebody comes close, and a click starts the taps, the coffee machine, hob, oven, microwave, toaster, fridge, arcade games or vending machine.
+- **A little worker for every open account.** It is at its desk and types while the account is busy, dozes off after a long time of work, and now and then takes a break in a sensible order: a meal (wash the hands, fridge, hob, oven, microwave or toaster, then eat at a table), a drink, the toilet (and wash the hands afterwards), a game of pool (they really aim for the pockets and walk round the table) or arcade, a rest on the sofa. A worker walks in through the front door only when its account opens and out when it closes. The toilet lights switch on when somebody is in, and now and then a cabin goes out of service until a repairman has been. The floor reads only local information: whether Claude Desktop runs and, where Claude Code keeps it, the status of its live sessions; nothing is sent anywhere.
+- **Decorate your office.** **Decorate** opens a panel to move the desks, add or remove furniture and change the floor and the wallpaper of the main office. Press **R** to turn a thing (a rug lies the other way, other things face the other way). Nothing can block the doors (2 x 2 tiles in front of the entrance, 2 x 4 in front of the other doors) or the way between the desks; your choices are saved on your computer.
 - **One click per account**, or **Run all**, from a small dark GUI. Add accounts with **+**.
 - **Guided first-time setup**: Back up → Distribute → Run → Ready. Nothing is deleted.
 - **Shared by default**: settings, `CLAUDE.md`, skills, plugins, commands, agents, hooks, history. Sign-in stays per account.
@@ -34,6 +38,18 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 - **Agent mode**: an AI agent can discover your other accounts (`scan`, `whoami`) and hand a task to one of them (`delegate`). Local only. See [Working across your accounts](#working-across-your-accounts).
 - **Safe**: every sign-in is wrapped in a recoverable step; an interrupted one is rolled back on the next start.
 - **Simple install**: one MSI, installed for your Windows user only. No admin rights, no dependencies. Turkish and English UI.
+
+<details open>
+<summary>Screenshot of the office floor</summary>
+<br>
+<img src="docs/images/floor-en.png" alt="The pixel office: header with buttons, the main office with five desks, kitchen, toilets and game room with workers" width="900">
+</details>
+
+<details>
+<summary>Screenshot of the decorating panel</summary>
+<br>
+<img src="docs/images/decorate-en.png" alt="The decorating panel next to the main office" width="700">
+</details>
 
 <details>
 <summary>Screenshot of the setup wizard</summary>

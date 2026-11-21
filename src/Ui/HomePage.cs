@@ -22,10 +22,14 @@ namespace ClaudeTogether
         Label lblTitle, lblSub, lblStatus;
         RoundBtn btnAll, btnMenu;
         Spinner busy;
+        FloorView floor;
+        RoundBtn btnView, btnDecor;
+        bool classic, hinted;
         WinTimer poll;
         bool polling;
         int working;
         Dictionary<string, bool> running = new Dictionary<string, bool>();
+        Dictionary<string, Presence> doing;      // null until the first look at what the accounts do; then the workers are put at their desks   // what each account is doing (busy, idle, away), for the workers on the floor
 
         public HomePage(MainForm m, Config c)
         {
@@ -62,7 +66,7 @@ namespace ClaudeTogether
             btnMenu.Glyph = GlyphKind.Menu;
             btnMenu.BackColor = Theme.Bg;
             btnMenu.Size = new Size(Theme.S(46), Theme.S(46));
-            btnMenu.Click += delegate { ShowSettings(); };
+            btnMenu.Click += delegate { ShowSettings(true); };
             top.Controls.Add(btnMenu);
 
             btnAll = new RoundBtn();
@@ -73,6 +77,23 @@ namespace ClaudeTogether
             btnAll.Size = new Size(Theme.S(196), Theme.S(46));
             btnAll.Click += delegate { StartAll(); };
             top.Controls.Add(btnAll);
+
+            btnView = new RoundBtn();
+            btnView.Kind = BtnKind.Secondary;
+            btnView.BackColor = Theme.Bg;
+            btnView.Size = new Size(Theme.S(168), Theme.S(46));
+            btnView.Visible = false;
+            btnView.Click += delegate { classic = !classic; ApplyMode(); };
+            top.Controls.Add(btnView);
+
+            btnDecor = new RoundBtn();
+            btnDecor.Kind = BtnKind.Secondary;
+            btnDecor.BackColor = Theme.Bg;
+            btnDecor.Text = Loc.T("Decorate");
+            btnDecor.Size = new Size(Theme.S(132), Theme.S(46));
+            btnDecor.Visible = false;
+            btnDecor.Click += delegate { floor.BeginEdit(); ApplyMode(); };
+            top.Controls.Add(btnDecor);
             top.Resize += delegate { PlaceTop(); };
 
             bottom = new Panel();
@@ -100,10 +121,28 @@ namespace ClaudeTogether
             flow.Padding = new Padding(Theme.S(24), Theme.S(8), Theme.S(16), Theme.S(8));
             UiWin.DarkScroll(flow);
 
+            floor = new FloorView();
+            floor.Dock = DockStyle.Fill;
+            floor.Visible = false;
+            floor.Act = OnCardAct;
+            floor.SetOffice(Core.LoadOffice());
+            floor.AddRequested = delegate(int desk) { AddNew(desk); };
+            floor.Changed = delegate { Core.SaveOffice(floor.Office); };
+            floor.EditEnded = delegate { ApplyMode(); };
+            floor.HudAction = delegate(string id)
+            {
+                if (id == "run") StartAll();
+                else if (id == "menu") ShowSettings(false);
+                else if (id == "view") { classic = !classic; ApplyMode(); }
+                else if (id == "decorate") { floor.BeginEdit(); ApplyMode(); }
+            };
+
             Controls.Add(flow);
+            Controls.Add(floor);
             Controls.Add(bottom);
             Controls.Add(top);
             PlaceTop();
+            Resize += delegate { ApplyMode(); };
             Rebuild();
 
             poll = new WinTimer();
@@ -117,11 +156,56 @@ namespace ClaudeTogether
         {
             btnAll.Location = new Point(top.Width - Theme.S(32) - btnAll.Width, Theme.S(27));
             btnMenu.Location = new Point(btnAll.Left - Theme.S(12) - btnMenu.Width, Theme.S(27));
+            btnView.Location = new Point(btnMenu.Left - Theme.S(12) - btnView.Width, Theme.S(27));
+            btnDecor.Location = new Point(btnView.Left - Theme.S(12) - btnDecor.Width, Theme.S(27));
+        }
+
+        /// <summary>
+        /// Shows the pixel floor when the window is big enough (whole-number scale of 2 or more) and the desks suffice; the classic cards
+        /// otherwise. The floor fills the whole window: its own header (logo, buttons, status) replaces the top and bottom bars.
+        /// </summary>
+        void ApplyMode()
+        {
+            int w = ClientSize.Width, h = ClientSize.Height;
+            bool fits = FloorView.FitScale(new Size(w, h)) >= 2 && cfg.Accounts.Count <= FloorPlan.MaxDesks;
+            if (!fits && floor.Editing) floor.EndEdit();
+            bool useFloor = fits && (!classic || floor.Editing);
+            btnView.Visible = fits && !floor.Editing;
+            btnView.Text = useFloor ? Loc.T("Classic view") : Loc.T("Floor view");
+            btnDecor.Visible = useFloor && !floor.Editing;
+            if (!fits && !classic && !hinted && w > 0 && h > 0)
+            {
+                hinted = true;
+                SetStatus(cfg.Accounts.Count > FloorPlan.MaxDesks
+                    ? Loc.T("The floor has {0} desks. More accounts are shown in the classic view.", FloorPlan.MaxDesks)
+                    : Loc.T("The window is too small for the floor view, so the classic view is shown."));
+            }
+            if (floor.Visible != useFloor) floor.Visible = useFloor;
+            if (flow.Visible == useFloor) flow.Visible = !useFloor;
+            top.Visible = !useFloor;
+            bottom.Visible = !useFloor;
+            UpdateHud();
+        }
+
+        /// <summary>Passes the texts and buttons of the home screen to the header of the floor.</summary>
+        void UpdateHud()
+        {
+            if (floor == null) return;
+            HudModel m = new HudModel();
+            m.Sub = lblSub.Text;
+            m.Status = lblStatus.Text;
+            m.Busy = busy.Visible;
+            m.RunText = btnAll.Text;
+            m.ViewText = Loc.T("Classic view");
+            m.DecorateText = btnDecor.Text;
+            m.ShowView = true;
+            m.ShowDecorate = true;
+            floor.SetHud(m);
         }
 
         protected override void Dispose(bool disposing) { if (disposing && poll != null) { poll.Stop(); poll.Dispose(); } base.Dispose(disposing); }
 
-        void SetStatus(string s) { lblStatus.Text = s; }
+        void SetStatus(string s) { lblStatus.Text = s; UpdateHud(); }
 
         /// <summary>Shows or hides the spinner; the status text moves right of it so the two never overlap.</summary>
         void SetBusy(bool on)
@@ -130,6 +214,7 @@ namespace ClaudeTogether
             if (on) busy.Start(); else busy.Stop();
             int left = on ? busy.Right + Theme.S(10) : Theme.S(32);
             lblStatus.SetBounds(left, Theme.S(13), Theme.S(700), Theme.S(22));
+            UpdateHud();
         }
 
         void Work(string status, Func<string> job)
@@ -164,7 +249,7 @@ namespace ClaudeTogether
                 flow.Controls.Add(card);
             }
             AddCard add = new AddCard();
-            add.Click += delegate { AddNew(); };
+            add.Click += delegate { AddNew(-1); };
             flow.Controls.Add(add);
             flow.ResumeLayout();
             ApplyStates();
@@ -173,6 +258,7 @@ namespace ClaudeTogether
         void ApplyStates()
         {
             int run = 0;
+            Dictionary<string, CardState> st = new Dictionary<string, CardState>();
             foreach (Control c in flow.Controls)
             {
                 AccountCard card = c as AccountCard;
@@ -180,9 +266,15 @@ namespace ClaudeTogether
                 bool isRun;
                 running.TryGetValue(card.Acct.Name, out isRun);
                 if (isRun) run++;
-                card.SetState(isRun ? CardState.Running : (Core.Ready(card.Acct) ? CardState.Ready : CardState.NeedLogin));
+                CardState state = isRun ? CardState.Running : (Core.Ready(card.Acct) ? CardState.Ready : CardState.NeedLogin);
+                card.SetState(state);
+                st[card.Acct.Name] = state;
             }
+            if (floor.Office.Sync(cfg.Accounts.Select(a => a.Name))) Core.SaveOffice(floor.Office);
+            floor.SetAccounts(cfg.Accounts, st, doing);
+            ApplyMode();
             lblSub.Text = Loc.T("{0} accounts  ·  {1} running", cfg.Accounts.Count, run);
+            UpdateHud();
         }
 
         void Poll()
@@ -193,7 +285,8 @@ namespace ClaudeTogether
             Task.Factory.StartNew(delegate
             {
                 Dictionary<string, bool> r = Core.Snapshot(snap);
-                main.Post(delegate { polling = false; if (IsDisposed) return; running = r; ApplyStates(); });
+                Dictionary<string, Presence> d = Core.Presences(snap, r);
+                main.Post(delegate { polling = false; if (IsDisposed) return; running = r; doing = d; ApplyStates(); });
             });
         }
 
@@ -247,7 +340,8 @@ namespace ClaudeTogether
             main.ShowStation(a, delegate(bool ok) { main.ShowHome(); });
         }
 
-        void AddNew()
+        /// <summary>Adds an account. From the floor, <paramref name="desk"/> is the empty desk that was clicked (-1: first empty desk).</summary>
+        void AddNew(int desk)
         {
             string n = Dlg.Input(main, Loc.T("New account"), Loc.T("Pick a short name for the account. It is only used in this app and in folder names."), Loc.T("Account name"), "", Core.ValidateName, Loc.T("Add"));
             if (n == null) return;
@@ -259,6 +353,11 @@ namespace ClaudeTogether
             {
                 Dlg.Info(main, Loc.T("Could not add account"), ex.Message);
                 return;
+            }
+            if (desk >= 0 && desk < floor.Office.Desks.Count && floor.Office.Desks[desk].Account == null)
+            {
+                floor.Office.Desks[desk].Account = cfg.Accounts.Last().Name;
+                Core.SaveOffice(floor.Office);
             }
             Rebuild();
             SetStatus(Loc.T("{0} added.", n));
@@ -294,7 +393,7 @@ namespace ClaudeTogether
             });
         }
 
-        void ShowSettings()
+        void ShowSettings(bool underButton)
         {
             ContextMenuStrip m = Menus.New();
             m.Items.Add(Menus.Item(Loc.T("Run the setup wizard again"), delegate
@@ -315,7 +414,8 @@ namespace ClaudeTogether
                 if (File.Exists(Paths.LogFile)) Process.Start(Paths.LogFile);
                 else Dlg.Info(main, Loc.T("No log yet"), Loc.T("Nothing has been logged yet."));
             }));
-            m.Show(btnMenu, new Point(btnMenu.Width - Theme.S(280), btnMenu.Height + Theme.S(6)));
+            if (underButton) m.Show(btnMenu, new Point(btnMenu.Width - Theme.S(280), btnMenu.Height + Theme.S(6)));
+            else m.Show(Cursor.Position);
         }
     }
 }

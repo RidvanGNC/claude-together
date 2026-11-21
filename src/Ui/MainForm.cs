@@ -21,7 +21,7 @@ namespace ClaudeTogether
             BackColor = Theme.Bg;
             ForeColor = Theme.Text;
             Font = Theme.F(10f, false);
-            ClientSize = new Size(Theme.S(1040), Theme.S(700));
+            ClientSize = new Size(Theme.S(1040), Theme.S(760));
             MinimumSize = new Size(Theme.S(820), Theme.S(600));
             StartPosition = FormStartPosition.CenterScreen;
             DoubleBuffered = true;

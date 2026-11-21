@@ -27,6 +27,10 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 
 ## Özellikler
 
+- **Ana ekran piksel bir ofis.** Her hesabın küçük bir ofis katında (mutfak, tuvaletler ve oyun odasıyla) kendi masası vardır. Masaya tıklayınca hesabı açılır, sağ tık menüsünü getirir, boş masaya (küçük **+**) tıklayınca o masada yeni hesap eklenir. Başlık (logo, durum, **Tümünü çalıştır**, menü, **Klasik görünüm**, **Dekore et**) ofisin tam üstünde aynı piksel çizimle yer alır; duvarlar pencereyi dolduracak şekilde büyür. Klasik kartlar tek tık uzakta, pencere küçükse otomatik devreye girer.
+- **Canlı bir ofis.** Pencerelerde gerçek saate göre sokak (şafak, akşam ve gece dahil) ve geçen arabalar ile yayalar görünür, saatler gerçek saati gösterir, biri yaklaşınca kapılar açılır, tıklayınca musluklar, kahve makinesi, ocak, fırın, mikrodalga, ekmek kızartma makinesi, buzdolabı, atari oyunları ve içecek otomatı çalışır.
+- **Açık her hesap için küçük bir çalışan.** Hesap meşgulken masasında yazar, uzun çalışmadan sonra uyuklar, ara sıra mantıklı bir sırayla mola verir: yemek (ellerini yıka, buzdolabı, ocak, fırın, mikrodalga veya ekmek kızartma makinesi, sonra masada ye), içecek, tuvalet (ve sonra el yıkama), bilardo (deliklere gerçekten nişan alır, masanın etrafında yürür) veya atari, kanepede dinlenme. Çalışan ön kapıdan yalnızca hesabı açıldığında girer, kapandığında çıkar. Biri içerideyken tuvalet ışıkları yanar, ara sıra bir kabin tamirci gelene kadar hizmet dışı kalır. Kat yalnızca yerel bilgiyi okur: Claude Desktop'ın çalışıp çalışmadığını ve Claude Code'un tuttuğu canlı oturumların durumunu; hiçbir şey bir yere gönderilmez.
+- **Ofisi dekore et.** **Dekore et** düğmesi bir panel açar: ana ofiste masaları taşıyabilir, eşya ekleyip kaldırabilir, zemini ve duvar kağıdını değiştirebilirsiniz. **R** tuşu seçili şeyi döndürür (halı öbür yöne yatar, diğer eşyalar öbür yöne bakar). Kapıların önü (girişte 2 x 2, diğer kapılarda 2 x 4 karo) ve masalar arasındaki yol kapatılamaz; seçimleriniz bilgisayarınıza kaydedilir.
 - Küçük, koyu temalı bir arayüzde **hesap başına tek tık** ya da **Tümünü çalıştır**. **+** ile hesap ekleyin.
 - **Adım adım ilk kurulum**: Yedekle → Dağıt → Çalıştır → Hazır. Hiçbir şey silinmez.
 - **Varsayılan olarak ortak**: ayarlar, `CLAUDE.md`, skill'ler, eklentiler, komutlar, ajanlar, hook'lar, geçmiş. Giriş bilgisi hesaba özel kalır.
@@ -34,6 +38,18 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 - **Ajan modu**: bir yapay zekâ ajanı diğer hesaplarınızı bulabilir (`scan`, `whoami`) ve birine görev devredebilir (`delegate`). Yalnızca yerelde. Bkz. [Hesaplar arasında çalışma](#hesaplar-arasında-çalışma).
 - **Güvenli**: her giriş geri alınabilir bir adımla sarılıdır. Yarım kalan işlem bir sonraki açılışta geri alınır.
 - **Kolay kurulum**: tek bir MSI, yalnızca Windows kullanıcınız için kurulur. Yönetici hakkı yok, bağımlılık yok. Arayüz Türkçe ve İngilizce.
+
+<details open>
+<summary>Ofis katının ekran görüntüsü</summary>
+<br>
+<img src="../docs/images/floor-tr.png" alt="Piksel ofis: düğmeli başlık, beş masalı ana ofis, mutfak, tuvaletler ve çalışanlarla oyun odası" width="900">
+</details>
+
+<details>
+<summary>Dekorasyon panelinin ekran görüntüsü</summary>
+<br>
+<img src="../docs/images/decorate-tr.png" alt="Ana ofisin yanındaki dekorasyon paneli" width="700">
+</details>
 
 <details>
 <summary>Kurulum sihirbazının ekran görüntüsü</summary>

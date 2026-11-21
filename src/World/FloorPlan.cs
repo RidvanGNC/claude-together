@@ -1,0 +1,404 @@
+// Copyright (c) 2026 Rıdvan Gonca. Licensed under the MIT License (see LICENSE). Keep this notice.
+using System;
+using System.Collections.Generic;
+
+namespace ClaudeTogether
+{
+    // The floor of the office as plain data: no drawing code, so it can be tested with Mono.
+    // Units are tiles (16 px when drawn). Walls run along tile boundaries; the first row of most rooms is a
+    // "back wall" row that shows the wall face (windows, cabinets) and cannot be walked on.
+
+    enum RoomKind { Office, Cabin, Hall, Kitchen, Game }
+
+    enum PropKind
+    {
+        Plant, Rug, Sink, SinkCounter, Mirror, Counter, Stove, Fridge, Cooler, Coffee, SmallTable, Chair,
+        Billiard, Arcade, Sofa, Armchair, BeanBag, SideTable, Vending, Bin, Lamp,
+        Window, Clock, Poster, DartBoard, UpperCabinets, Bookshelf, Whiteboard, CueRack, NeonSign
+    }
+
+    enum DoorKind { Main, Opening, Cabin }
+
+    sealed class TileRect
+    {
+        public int X, Y, W, H;
+        public TileRect(int x, int y, int w, int h) { X = x; Y = y; W = w; H = h; }
+        public bool Contains(int x, int y) { return x >= X && x < X + W && y >= Y && y < Y + H; }
+        public bool Overlaps(TileRect o) { return X < o.X + o.W && o.X < X + W && Y < o.Y + o.H && o.Y < Y + H; }
+    }
+
+    sealed class Room
+    {
+        public RoomKind Kind;
+        public string Name;     // English text; Loc.T when shown
+        public bool Hidden;     // the inside is not drawn (toilet cabins)
+        public List<TileRect> Parts = new List<TileRect>();
+
+        public bool Contains(int x, int y)
+        {
+            foreach (TileRect r in Parts) if (r.Contains(x, y)) return true;
+            return false;
+        }
+
+        public int Area()
+        {
+            int n = 0;
+            foreach (TileRect r in Parts) n += r.W * r.H;
+            return n;
+        }
+    }
+
+    /// <summary>A wall along grid lines, from (X1,Y1) to (X2,Y2). Horizontal when Y1 == Y2.</summary>
+    sealed class Wall
+    {
+        public int X1, Y1, X2, Y2;
+        public Wall(int x1, int y1, int x2, int y2) { X1 = x1; Y1 = y1; X2 = x2; Y2 = y2; }
+        public bool Horizontal { get { return Y1 == Y2; } }
+    }
+
+    /// <summary>
+    /// A door cut into a wall. (X,Y) is the first tile edge; it runs Len tiles to the right (horizontal) or down (vertical).
+    /// </summary>
+    sealed class Door
+    {
+        public DoorKind Kind;
+        public int X, Y, Len;
+        public bool Horizontal;
+        public Door(DoorKind kind, int x, int y, int len, bool horizontal) { Kind = kind; X = x; Y = y; Len = len; Horizontal = horizontal; }
+    }
+
+    /// <summary>A desk position. The desk covers (X,Y) and (X+1,Y); the chair is the tile below its left half.</summary>
+    sealed class Slot
+    {
+        public int Index, X, Y;
+        public int ChairX { get { return X; } }
+        public int ChairY { get { return Y + 1; } }
+    }
+
+    sealed class Prop
+    {
+        public PropKind Kind;
+        public int X, Y, W, H;
+        public bool Blocks;     // cannot be walked through
+        public bool OnWall;     // hangs on a back wall row; takes no floor space
+        public int Variant;
+        public int Rot;         // 0, or 1 when the player turned it (a rug lies the other way, other things face the other way)
+        public TileRect Rect { get { return new TileRect(X, Y, W, H); } }
+    }
+
+    sealed class Layout
+    {
+        public List<Room> Rooms = new List<Room>();
+        public List<Wall> Walls = new List<Wall>();
+        public List<Door> Doors = new List<Door>();
+        public List<Slot> Slots = new List<Slot>();
+        public List<Prop> Props = new List<Prop>();
+        public List<TileRect> BackRows = new List<TileRect>();
+        public List<TileRect> KeepClear = new List<TileRect>();   // in front of the doors: no desk or furniture here
+        public List<TileRect> LastRows = new List<TileRect>();    // the last row of each room stays empty
+
+        readonly HashSet<int> hWalls = new HashSet<int>();   // wall between (x,y-1) and (x,y)
+        readonly HashSet<int> vWalls = new HashSet<int>();   // wall between (x-1,y) and (x,y)
+        bool[,] walk;
+
+        static int Key(int a, int b) { return (a << 8) | b; }
+
+        public Room RoomAt(int x, int y)
+        {
+            foreach (Room r in Rooms) if (r.Contains(x, y)) return r;
+            return null;
+        }
+
+        public bool Walkable(int x, int y)
+        {
+            return x >= 0 && y >= 0 && x < FloorPlan.Cols && y < FloorPlan.Rows && walk[x, y];
+        }
+
+        /// <summary>True when a walker on (x,y) may step one tile in the direction (dx,dy), through open doors.</summary>
+        public bool CanStep(int x, int y, int dx, int dy)
+        {
+            int nx = x + dx, ny = y + dy;
+            if (!Walkable(x, y) || !Walkable(nx, ny)) return false;
+            if (dy < 0) return !hWalls.Contains(Key(x, y));
+            if (dy > 0) return !hWalls.Contains(Key(x, ny));
+            if (dx < 0) return !vWalls.Contains(Key(x, y));
+            return !vWalls.Contains(Key(nx, y));
+        }
+
+        public bool IsWallEdge(bool horizontal, int x, int y)
+        {
+            return horizontal ? hWalls.Contains(Key(x, y)) : vWalls.Contains(Key(x, y));
+        }
+
+        /// <summary>Tiles reachable from (sx,sy) by walking through doors.</summary>
+        public HashSet<int> Reach(int sx, int sy)
+        {
+            HashSet<int> seen = new HashSet<int>();
+            if (!Walkable(sx, sy)) return seen;
+            Queue<int> q = new Queue<int>();
+            q.Enqueue(Key(sx, sy));
+            seen.Add(Key(sx, sy));
+            int[] dxs = { 1, -1, 0, 0 }, dys = { 0, 0, 1, -1 };
+            while (q.Count > 0)
+            {
+                int k = q.Dequeue();
+                int x = k >> 8, y = k & 255;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (!CanStep(x, y, dxs[i], dys[i])) continue;
+                    int nk = Key(x + dxs[i], y + dys[i]);
+                    if (seen.Add(nk)) q.Enqueue(nk);
+                }
+            }
+            return seen;
+        }
+
+        public bool ReachedTile(HashSet<int> reach, int x, int y) { return reach.Contains(Key(x, y)); }
+
+        /// <summary>
+        /// The shortest walk from tile (sx,sy) to tile (tx,ty) as a list of tiles (the start is not in it), or null when
+        /// there is no way. Doors count as open; people walk through them.
+        /// </summary>
+        public List<int[]> Path(int sx, int sy, int tx, int ty)
+        {
+            if (!Walkable(sx, sy) || !Walkable(tx, ty)) return null;
+            List<int[]> none = new List<int[]>();
+            if (sx == tx && sy == ty) return none;
+            Dictionary<int, int> from = new Dictionary<int, int>();
+            Queue<int> q = new Queue<int>();
+            int start = Key(sx, sy), goal = Key(tx, ty);
+            q.Enqueue(start);
+            from[start] = -1;
+            int[] dxs = { 1, -1, 0, 0 }, dys = { 0, 0, 1, -1 };
+            while (q.Count > 0)
+            {
+                int k = q.Dequeue();
+                if (k == goal) break;
+                int x = k >> 8, y = k & 255;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (!CanStep(x, y, dxs[i], dys[i])) continue;
+                    int nk = Key(x + dxs[i], y + dys[i]);
+                    if (from.ContainsKey(nk)) continue;
+                    from[nk] = k;
+                    q.Enqueue(nk);
+                }
+            }
+            if (!from.ContainsKey(goal)) return null;
+            List<int[]> path = new List<int[]>();
+            for (int k = goal; k != start; k = from[k]) path.Add(new[] { k >> 8, k & 255 });
+            path.Reverse();
+            return path;
+        }
+
+        internal void Finish()
+        {
+            foreach (Wall w in Walls)
+            {
+                if (w.Horizontal) for (int x = w.X1; x < w.X2; x++) hWalls.Add(Key(x, w.Y1));
+                else for (int y = w.Y1; y < w.Y2; y++) vWalls.Add(Key(w.X1, y));
+            }
+            foreach (Door d in Doors)
+            {
+                for (int i = 0; i < d.Len; i++)
+                {
+                    if (d.Horizontal) hWalls.Remove(Key(d.X + i, d.Y));
+                    else vWalls.Remove(Key(d.X, d.Y + i));
+                }
+            }
+
+            walk = new bool[FloorPlan.Cols, FloorPlan.Rows];
+            foreach (Room r in Rooms)
+                foreach (TileRect p in r.Parts)
+                    for (int x = p.X; x < p.X + p.W; x++)
+                        for (int y = p.Y; y < p.Y + p.H; y++) walk[x, y] = true;
+            foreach (TileRect b in BackRows)
+                for (int x = b.X; x < b.X + b.W; x++)
+                    for (int y = b.Y; y < b.Y + b.H; y++) walk[x, y] = false;
+            foreach (Door d in Doors)
+                if (d.Kind == DoorKind.Main) for (int i = 0; i < d.Len; i++) walk[d.X + i, d.Y] = true;   // the way in, through the back wall row
+            foreach (Prop p in Props)
+            {
+                if (!p.Blocks || p.OnWall) continue;
+                for (int x = p.X; x < p.X + p.W; x++)
+                    for (int y = p.Y; y < p.Y + p.H; y++) walk[x, y] = false;
+            }
+            foreach (Slot s in Slots)
+            {
+                walk[s.X, s.Y] = false;       // the desk, assumed in place
+                walk[s.X + 1, s.Y] = false;
+                walk[s.ChairX, s.ChairY] = true;
+            }
+        }
+    }
+
+    static class FloorPlan
+    {
+        public const int Cols = 30;
+        public const int Rows = 17;
+        public const int Tile = 16;
+        public const int MaxDesks = 10;
+        public const int PixelOx = 8;     // where tile column 0 starts in the picture
+
+        /// <summary>
+        /// The picture columns (first and last) of the street strip that each window shows, from left to right.
+        /// All windows read the same strip, so traffic moves from one to the next.
+        /// </summary>
+        public static List<int[]> GlassRanges(Layout l)
+        {
+            List<int[]> ranges = new List<int[]>();
+            foreach (Prop p in l.Props)
+                if (p.Kind == PropKind.Window)
+                {
+                    int first = PixelOx + p.X * 16 + 3;
+                    ranges.Add(new[] { first, first + p.W * 16 - 7 });
+                }
+            ranges.Sort((a, b) => a[0].CompareTo(b[0]));
+            return ranges;
+        }
+
+        static Room AddRoom(Layout l, RoomKind kind, string name, bool hidden, params TileRect[] parts)
+        {
+            Room r = new Room();
+            r.Kind = kind;
+            r.Name = name;
+            r.Hidden = hidden;
+            r.Parts.AddRange(parts);
+            l.Rooms.Add(r);
+            return r;
+        }
+
+        static void AddProp(Layout l, PropKind kind, int x, int y, int w, int h, bool blocks, bool onWall, int variant)
+        {
+            Prop p = new Prop();
+            p.Kind = kind; p.X = x; p.Y = y; p.W = w; p.H = h; p.Blocks = blocks; p.OnWall = onWall; p.Variant = variant;
+            l.Props.Add(p);
+        }
+
+        static void Floor(Layout l, PropKind kind, int x, int y, int w, int h, int variant) { AddProp(l, kind, x, y, w, h, true, false, variant); }
+        static void Decor(Layout l, PropKind kind, int x, int y, int w, int h, int variant) { AddProp(l, kind, x, y, w, h, false, false, variant); }
+        static void Hung(Layout l, PropKind kind, int x, int y, int w, int h, int variant) { AddProp(l, kind, x, y, w, h, false, true, variant); }
+
+        public static Layout Build() { return Build(OfficeState.Default()); }
+
+        /// <summary>The whole floor. The main office is built from the player's state (desks, decorations); the other rooms are fixed.</summary>
+        public static Layout Build(OfficeState office)
+        {
+            Layout l = new Layout();
+
+            // rooms: 30 x 17 tiles in total. Down the right side: kitchen, toilets with the hall, game room.
+            AddRoom(l, RoomKind.Office, "Main office", false, new TileRect(0, 0, 18, 17));
+            AddRoom(l, RoomKind.Kitchen, "Kitchen", false, new TileRect(18, 0, 12, 5));
+            AddRoom(l, RoomKind.Cabin, "Toilet", true, new TileRect(18, 5, 2, 2));
+            AddRoom(l, RoomKind.Cabin, "Toilet", true, new TileRect(20, 5, 2, 2));
+            AddRoom(l, RoomKind.Cabin, "Toilet", true, new TileRect(22, 5, 2, 2));
+            AddRoom(l, RoomKind.Hall, "Hall", false, new TileRect(18, 7, 12, 3), new TileRect(24, 5, 6, 2));
+            AddRoom(l, RoomKind.Game, "Game room", false, new TileRect(18, 10, 12, 7));
+
+            // the first row of a room is its back wall (not walkable)
+            l.BackRows.Add(new TileRect(0, 0, 18, 1));
+            l.BackRows.Add(new TileRect(18, 0, 12, 1));
+            l.BackRows.Add(new TileRect(24, 5, 6, 1));
+            l.BackRows.Add(new TileRect(18, 10, 12, 1));
+
+            // the last row of a room stays empty, so nothing looks glued to the wall below it
+            l.LastRows.Add(new TileRect(0, 16, 18, 1));
+            l.LastRows.Add(new TileRect(18, 4, 12, 1));
+            l.LastRows.Add(new TileRect(18, 9, 12, 1));
+            l.LastRows.Add(new TileRect(18, 16, 12, 1));
+
+            // walls
+            l.Walls.Add(new Wall(0, 0, 30, 0));
+            l.Walls.Add(new Wall(0, 17, 30, 17));
+            l.Walls.Add(new Wall(0, 0, 0, 17));
+            l.Walls.Add(new Wall(30, 0, 30, 17));
+            l.Walls.Add(new Wall(18, 0, 18, 17));    // between the office and the rooms on the right
+            l.Walls.Add(new Wall(18, 5, 30, 5));     // kitchen | toilets and hall
+            l.Walls.Add(new Wall(18, 10, 30, 10));   // hall | game room
+            l.Walls.Add(new Wall(18, 7, 24, 7));     // fronts of the toilet cabins
+            l.Walls.Add(new Wall(20, 5, 20, 7));
+            l.Walls.Add(new Wall(22, 5, 22, 7));
+            l.Walls.Add(new Wall(24, 5, 24, 7));
+
+            // doors
+            l.Doors.Add(new Door(DoorKind.Main, 1, 0, 2, true));
+            l.Doors.Add(new Door(DoorKind.Opening, 18, 3, 2, false));    // office to kitchen
+            l.Doors.Add(new Door(DoorKind.Opening, 18, 8, 2, false));    // office to hall
+            l.Doors.Add(new Door(DoorKind.Opening, 18, 12, 2, false));   // office to game room
+            l.Doors.Add(new Door(DoorKind.Cabin, 19, 7, 1, true));       // on the right tile of each cabin
+            l.Doors.Add(new Door(DoorKind.Cabin, 21, 7, 1, true));
+            l.Doors.Add(new Door(DoorKind.Cabin, 23, 7, 1, true));
+
+            // nothing may stand in front of the entrance and the doors of the office
+            foreach (Door d in l.Doors)
+            {
+                if (d.Kind == DoorKind.Main) l.KeepClear.Add(new TileRect(d.X, 1, d.Len, 2));                // 2 x 2 in front of the entrance
+                else if (d.Kind == DoorKind.Opening) l.KeepClear.Add(new TileRect(16, d.Y - 1, 2, d.Len + 2));   // 2 wide, 4 tall in front of the others
+            }
+
+            // main office: windows belong to the building, the rest comes from the player's state
+            Hung(l, PropKind.Window, 6, 0, 2, 1, 0);
+            Hung(l, PropKind.Window, 10, 0, 2, 1, 0);
+            Hung(l, PropKind.Window, 14, 0, 2, 1, 0);
+            foreach (DeskPos d in office.Desks)
+            {
+                Slot s = new Slot();
+                s.Index = l.Slots.Count; s.X = d.X; s.Y = d.Y;
+                l.Slots.Add(s);
+            }
+            foreach (DecorItem it in office.Items)
+            {
+                DecorKind k = Decorating.Find(it.Kind, it.Variant);
+                if (k == null) continue;
+                AddProp(l, it.Kind, it.X, it.Y, k.Wid(it.Rot), k.Hei(it.Rot), k.Blocks, k.OnWall, it.Variant);
+                l.Props[l.Props.Count - 1].Rot = it.Rot & 1;
+            }
+
+            // kitchen (top right, against the street wall): counters along the wall, two small tables for two
+            Hung(l, PropKind.UpperCabinets, 18, 0, 2, 1, 0);      // above the sink; the range hood has the wall to itself
+            Hung(l, PropKind.UpperCabinets, 22, 0, 2, 1, 0);
+            Hung(l, PropKind.Clock, 24, 0, 1, 1, 1);
+            Hung(l, PropKind.Window, 26, 0, 2, 1, 1);
+            Floor(l, PropKind.Sink, 18, 1, 2, 1, 1);
+            Floor(l, PropKind.Stove, 20, 1, 2, 1, 0);
+            Floor(l, PropKind.Counter, 22, 1, 3, 1, 1);
+            Floor(l, PropKind.Coffee, 25, 1, 1, 1, 0);
+            Floor(l, PropKind.Cooler, 26, 1, 1, 1, 0);
+            Floor(l, PropKind.Counter, 27, 1, 2, 1, 0);
+            Floor(l, PropKind.Fridge, 29, 1, 1, 1, 0);
+            Floor(l, PropKind.SmallTable, 20, 3, 2, 1, 0);
+            AddProp(l, PropKind.Chair, 19, 3, 1, 1, false, false, 1);
+            AddProp(l, PropKind.Chair, 22, 3, 1, 1, false, false, 2);
+            Floor(l, PropKind.SmallTable, 25, 3, 2, 1, 0);
+            AddProp(l, PropKind.Chair, 24, 3, 1, 1, false, false, 1);
+            AddProp(l, PropKind.Chair, 27, 3, 1, 1, false, false, 2);
+
+            // toilets (middle): cabins, and the hall with the washbasins on one marble block
+            Hung(l, PropKind.Mirror, 24, 5, 2, 1, 0);          // one over each basin; the block is 6 tiles, so they sit evenly
+            Hung(l, PropKind.Mirror, 26, 5, 2, 1, 0);
+            Hung(l, PropKind.Mirror, 28, 5, 2, 1, 0);
+            Floor(l, PropKind.SinkCounter, 24, 6, 6, 1, 0);
+            Floor(l, PropKind.Bin, 29, 8, 1, 1, 0);
+
+            // game room
+            Hung(l, PropKind.NeonSign, 19, 10, 3, 1, 0);
+            Hung(l, PropKind.Poster, 22, 10, 2, 1, 0);
+            Hung(l, PropKind.CueRack, 24, 10, 1, 1, 0);
+            Hung(l, PropKind.DartBoard, 29, 10, 1, 1, 0);
+            Decor(l, PropKind.Rug, 21, 12, 7, 4, 1);
+            Floor(l, PropKind.Sofa, 19, 11, 4, 1, 0);
+            Floor(l, PropKind.SideTable, 23, 11, 1, 1, 0);
+            Floor(l, PropKind.Arcade, 25, 11, 1, 1, 0);
+            Floor(l, PropKind.Arcade, 26, 11, 1, 1, 1);
+            Floor(l, PropKind.Arcade, 27, 11, 1, 1, 2);
+            Floor(l, PropKind.Vending, 28, 11, 1, 1, 0);       // one tile off the wall, so its right edge shows
+            Floor(l, PropKind.Billiard, 22, 13, 5, 2, 0);       // 5 x 2 tiles in the middle of the rug: players can walk all round it
+            Floor(l, PropKind.Armchair, 19, 15, 1, 1, 0);
+            Floor(l, PropKind.BeanBag, 20, 15, 1, 1, 0);
+            Floor(l, PropKind.Bin, 29, 15, 1, 1, 0);
+
+            l.Finish();
+            return l;
+        }
+    }
+}
