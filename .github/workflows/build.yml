@@ -246,7 +246,13 @@ jobs:
         run: |
           Compress-Archive -Path bin\ClaudeTogether.exe, bin\claude-together.exe, LICENSE -DestinationPath "dist\ClaudeTogether-$env:VERSION-portable.zip"
           $lines = Get-ChildItem dist -File | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" }
-          $lines | Set-Content dist\SHA256SUMS.txt -Encoding ascii
+          # LF line endings, so 'sha256sum -c' works on Linux, WSL and Git Bash as well as Get-FileHash on Windows
+          [IO.File]::WriteAllText("$PWD\dist\SHA256SUMS.txt", (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
+          if ((Get-Content dist\SHA256SUMS.txt -Raw) -match "`r") { throw "SHA256SUMS.txt must use LF line endings" }
+          Push-Location dist
+          & "$env:ProgramFiles\Git\usr\bin\sha256sum.exe" -c SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw "sha256sum could not verify the files listed in SHA256SUMS.txt" }
+          Pop-Location
           Get-Content dist\SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
