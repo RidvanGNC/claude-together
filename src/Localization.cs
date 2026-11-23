@@ -20,6 +20,16 @@ namespace ClaudeTogether
             return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "tr" ? "tr" : "en";
         }
 
+        /// <summary>
+        /// Switches the language: "en" or "tr" for sure, "auto" for what the environment and Windows say. The texts are looked up at the moment
+        /// they are shown, so what is built afterwards speaks the new language.
+        /// </summary>
+        public static void Apply(string choice)
+        {
+            if (choice == "en" || choice == "tr") Lang = choice;
+            else Lang = Detect();
+        }
+
         /// <summary>Translates <paramref name="en"/> and applies string.Format when arguments are given.</summary>
         public static string T(string en, params object[] args)
         {
@@ -138,6 +148,9 @@ namespace ClaudeTogether
             { "Run", "Çalıştır" },
             { "Run all", "Tümünü çalıştır" },
             { "Run the setup wizard again", "Kurulum sihirbazını yeniden çalıştır" },
+            { "Language", "Dil" },
+            { "Turn the office (R)", "Ofisi döndür (R)" },
+            { "Automatic (language of Windows)", "Otomatik (Windows dili)" },
             { "Update available", "Güncelleme var" },
             { "Claude Together {0} is out. You have {1}.", "Claude Together {0} yayında. Sizdeki sürüm {1}." },
             { "What is new", "Yenilikler" },

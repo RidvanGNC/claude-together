@@ -61,6 +61,16 @@ static class UpdateTests
     /// <summary>Runs the checks. <paramref name="touchProfile"/> also tries the things that write settings.json in the profile (only under a throw-away home).</summary>
     public static void Run(Action<bool, string> Check, bool touchProfile)
     {
+        string langWas = Loc.Lang;
+        Loc.Apply("tr");
+        bool turkish = Loc.T("Language") == "Dil" && Loc.T("Run all") == "Tümünü çalıştır" && Loc.T("Updated to {0}.", "1.3.0") == "1.3.0 sürümüne güncellendi.";
+        Loc.Apply("en");
+        bool english = Loc.T("Language") == "Language" && Loc.T("Updated to {0}.", "1.3.0") == "Updated to 1.3.0.";
+        Loc.Apply("auto");
+        bool automatic = Loc.Lang == "en" || Loc.Lang == "tr";
+        Loc.Lang = langWas;
+        Check(turkish && english && automatic, "language: every text of the program is looked up when it is shown, so switching the language between English, Turkish and automatic changes all of them");
+
         Version v;
         Check(Updates.TryParseVersion("v1.2.0", out v) && v.ToString() == "1.2.0" && Updates.TryParseVersion("1.2", out v) && v.ToString() == "1.2.0" &&
               Updates.TryParseVersion("v2.0.5-rc1", out v) && v.ToString() == "2.0.5" && Updates.TryParseVersion("1.4.0+build7", out v) && v.ToString() == "1.4.0" &&
@@ -203,15 +213,16 @@ static class UpdateTests
 
             if (touchProfile)
             {
-                UpdateSettings st = Updates.LoadSettings();
+                AppSettings st = Updates.LoadSettings();
                 bool defaults = st.CheckOnStart && st.SkippedVersion == "";
-                st.CheckOnStart = false; st.SkippedVersion = "v1.4.0";
+                st.CheckOnStart = false; st.SkippedVersion = "v1.4.0"; st.Language = "tr"; st.View = 2;
                 Updates.SaveSettings(st);
-                UpdateSettings back = Updates.LoadSettings();
-                bool saved = !back.CheckOnStart && back.SkippedVersion == "v1.4.0" && !File.Exists(Paths.SettingsFile + ".tmp");
+                AppSettings back = Updates.LoadSettings();
+                bool saved = !back.CheckOnStart && back.SkippedVersion == "v1.4.0" && back.Language == "tr" && back.View == 2 && !File.Exists(Paths.SettingsFile + ".tmp");
                 string offWas = Environment.GetEnvironmentVariable(Updates.OffVariable);
                 bool autoOff = !Updates.AutoCheckAllowed();
-                st.CheckOnStart = true; Updates.SaveSettings(st);
+                st.CheckOnStart = true; st.Language = "klingon"; st.View = 9; Updates.SaveSettings(st);
+                bool oddValues = Updates.LoadSettings().Language == "auto" && Updates.LoadSettings().View == 0;
                 bool autoOn = Updates.AutoCheckAllowed();
                 Environment.SetEnvironmentVariable(Updates.OffVariable, "1");
                 bool scriptOff = !Updates.AutoCheckAllowed();
@@ -219,7 +230,7 @@ static class UpdateTests
                 File.WriteAllText(Paths.SettingsFile, "{ broken");
                 bool broken = Updates.LoadSettings().CheckOnStart;
                 File.Delete(Paths.SettingsFile);
-                Check(defaults && saved && autoOff && autoOn && scriptOff && broken, "update: the check is on by default; the user's choice and the skipped version are saved; the switch or the environment turn the check off; a damaged settings file means the defaults");
+                Check(defaults && saved && oddValues && autoOff && autoOn && scriptOff && broken, "update: the check is on by default; the user's choice and the skipped version are saved; the switch or the environment turn the check off; a damaged settings file means the defaults");
             }
         }
         finally { try { Directory.Delete(dir, true); } catch (Exception) { } }

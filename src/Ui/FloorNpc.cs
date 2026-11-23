@@ -78,6 +78,55 @@ namespace ClaudeTogether
             if (clipped) p.G.ResetClip();
         }
 
+        /// <summary>
+        /// The same worker in the office turned by a view (see <see cref="ViewGeo"/>): the place and the direction turn with the picture. A worker
+        /// at a desk sits on the chair; seen from the front, the back or the side it is drawn the way a seated worker looks from there.
+        /// </summary>
+        public static void DrawView(Px p, Npc n, long ms, Stroke stroke, ViewGeo g, Layout layout)
+        {
+            Look c = LookOf(n.Style);
+            if (n.Repairman) { c.Hair = 0xF0C040; c.Shirt = 0xE07A2C; c.ShirtDark = Darker(c.Shirt, 0.78); c.Pants = 0x3A4A66; c.Long = false; }
+            bool staying = !n.Walking && n.At != null;
+            Pose pose = staying ? n.Pose : Pose.Stand;
+            Facing face = ViewMap.Face(g.R, n.Face);
+            int fx, fy;
+            if (pose == Pose.Work && n.At.Desk >= 0 && n.At.Desk < layout.Slots.Count)
+            {
+                FloorArt.SeatFeet(g, layout.Slots[n.At.Desk], out fx, out fy);
+                face = ViewMap.Face(g.R, Facing.Up);
+            }
+            else
+            {
+                double px = n.X * 16.0, py = n.Y * 16.0;
+                if (staying && n.At.Chair)
+                {
+                    double slide = n.At.Dir * (12.0 - 8.0 * n.At.Pull);
+                    px += slide;
+                }
+                g.Point(px, py, out fx, out fy);
+                if (pose == Pose.Sit) fy -= 4;                                      // on a seat
+            }
+            bool seated = pose == Pose.Sit || pose == Pose.Work;
+            if (!seated) p.RA(fx - 4, fy - 2, 9, 3, 0x000000, 55);
+            if (seated) Seated(p, c, fx, fy, face, ms, pose == Pose.Work && n.Dozing, pose == Pose.Sit && n.At != null && n.At.Group == "table");
+            else
+            {
+                int step = n.Walking ? (int)(n.Walked * 2.6) % 4 : 0;
+                Standing(p, c, fx, fy, face, step, pose, ms);
+                if (n.Repairman) Toolbox(p, fx, fy, face);
+                if (pose == Pose.Pool && n.HasCue && stroke != null) Cue(p, c, fx, fy, face, stroke);
+                else if (n.HasCue) HeldCue(p, fx, fy, face);
+            }
+        }
+
+        /// <summary>A seated worker as seen from where the viewer is: from behind, from the front or from the side.</summary>
+        static void Seated(Px p, Look c, int fx, int fy, Facing face, long ms, bool dozing, bool table)
+        {
+            if (face == Facing.Up) Typing(p, c, fx, fy, ms, dozing);
+            else if (face == Facing.Down) Sitting(p, c, fx, fy, face, ms, false);
+            else Sitting(p, c, fx, fy, face, ms, true);
+        }
+
         // ---------- parts ----------
 
         static void HeadFront(Px p, Look c, int fx, int top)

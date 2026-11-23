@@ -11,13 +11,13 @@ namespace ClaudeTogether
         public string Sub = "", Status = "";
         public bool Busy;
         public string RunText = "", ViewText = "", DecorateText = "";
-        public bool ShowView, ShowDecorate;
+        public bool ShowView, ShowDecorate, ShowRotate;
     }
 
     sealed class HudButton
     {
         public string Id, Text;
-        public bool Primary, Menu, Play;
+        public bool Primary, Menu, Play, Rotate;
         public Rectangle Rect;      // picture pixels
     }
 
@@ -34,19 +34,46 @@ namespace ClaudeTogether
         static string Clean(string text) { return string.Join(" ", (text ?? "").Split(Blanks, StringSplitOptions.RemoveEmptyEntries)); }
 
         /// <summary>The buttons from the right edge of the office to the left; none while the player is decorating.</summary>
-        public static List<HudButton> Buttons(HudModel m, bool editing)
+        public static List<HudButton> Buttons(HudModel m, bool editing) { return Buttons(m, editing, ViewGeo.Of(0)); }
+
+        /// <summary>
+        /// The buttons for a view: in a row above the office, or (when the office stands up) in the column beside it: the two small buttons
+        /// next to the title, the others one under the other.
+        /// </summary>
+        public static List<HudButton> Buttons(HudModel m, bool editing, ViewGeo g)
         {
             List<HudButton> list = new List<HudButton>();
             if (editing) return list;
-            int right = FloorArt.Ox + FloorPlan.Cols * 16 - 2;
             List<HudButton> order = new List<HudButton>();
             HudButton run = new HudButton(); run.Id = "run"; run.Text = Clean(m.RunText); run.Primary = true; run.Play = true; order.Add(run);
             HudButton menu = new HudButton(); menu.Id = "menu"; menu.Menu = true; menu.Text = ""; order.Add(menu);
+            if (m.ShowRotate) { HudButton r = new HudButton(); r.Id = "rotate"; r.Rotate = true; r.Text = ""; order.Add(r); }
             if (m.ShowView) { HudButton v = new HudButton(); v.Id = "view"; v.Text = Clean(m.ViewText); order.Add(v); }
             if (m.ShowDecorate) { HudButton d = new HudButton(); d.Id = "decorate"; d.Text = Clean(m.DecorateText); order.Add(d); }
+            if (g.Portrait)
+            {
+                int small = g.ColX + ViewGeo.ColW, y = g.Oy + SideButtonsY;
+                foreach (HudButton b in order)
+                {
+                    if (b.Menu || b.Rotate)
+                    {
+                        small -= PixelUi.MenuButtonWidth;
+                        b.Rect = new Rectangle(small, g.Oy + 1, PixelUi.MenuButtonWidth, PixelUi.ButtonH);
+                        small -= 4;
+                    }
+                    else
+                    {
+                        b.Rect = new Rectangle(g.ColX, y, ViewGeo.ColW, PixelUi.ButtonH);
+                        y += PixelUi.ButtonH + 4;
+                    }
+                    list.Add(b);
+                }
+                return list;
+            }
+            int right = g.HeaderRight;
             foreach (HudButton b in order)
             {
-                int w = b.Menu ? PixelUi.MenuButtonWidth : PixelUi.ButtonWidth(b.Text, b.Play);
+                int w = b.Menu || b.Rotate ? PixelUi.MenuButtonWidth : PixelUi.ButtonWidth(b.Text, b.Play);
                 right -= w;
                 b.Rect = new Rectangle(right, ButtonY, w, PixelUi.ButtonH);
                 right -= 4;
@@ -54,6 +81,8 @@ namespace ClaudeTogether
             }
             return list;
         }
+
+        const int SideButtonsY = 50;      // where the stack of buttons starts in the column, from the top of the building
 
         public static string ButtonAt(List<HudButton> buttons, Point logical)
         {
@@ -87,8 +116,11 @@ namespace ClaudeTogether
             PixelFont.DrawScaled(p, text, x, y, rgb, scale);
         }
 
-        public static void Draw(Px p, HudModel m, List<HudButton> buttons, string hover, long ms)
+        public static void Draw(Px p, HudModel m, List<HudButton> buttons, string hover, long ms) { Draw(p, m, buttons, hover, ms, ViewGeo.Of(0)); }
+
+        public static void Draw(Px p, HudModel m, List<HudButton> buttons, string hover, long ms, ViewGeo g)
         {
+            if (g.Portrait) { DrawColumn(p, m, ms, g); return; }
             Logo(p, 10, 6);
             Shadowed(p, "CLAUDE TOGETHER", 32, 5, 0xF4E9D8, 2);
             int right = FloorArt.Ox + FloorPlan.Cols * 16;
@@ -100,20 +132,41 @@ namespace ClaudeTogether
             PixelUi.Text(p, sub, x, 19, 0xC9B79A);
             x += PixelFont.Width(sub) + 8;
             if (status.Length == 0 && !m.Busy) return;
-            if (m.Busy)
-            {
-                int[][] ring = { new[] { 1, 0 }, new[] { 2, 0 }, new[] { 3, 1 }, new[] { 3, 2 }, new[] { 2, 3 }, new[] { 1, 3 }, new[] { 0, 2 }, new[] { 0, 1 } };
-                int head = (int)(ms / 90) % 8;
-                for (int i = 0; i < 8; i++)
-                {
-                    int age = (head - i + 8) % 8;
-                    p.P(x + ring[i][0], 19 + 1 + ring[i][1], age < 3 ? (age == 0 ? 0xFFE9A0 : (age == 1 ? 0xE0C060 : 0x8A7438)) : 0x4A3F36);
-                }
-                x += 7;
-            }
+            if (m.Busy) { Spinner(p, x, 19 + 1, ms); x += 7; }
             int left = (right - 8 - x) / 4;
             if (status.Length > left) status = left > 1 ? status.Substring(0, left - 1) + "…" : "";
             PixelUi.Text(p, status, x, 19, 0xE0C060);
+        }
+
+        static void Spinner(Px p, int x, int y, long ms)
+        {
+            int[][] ring = { new[] { 1, 0 }, new[] { 2, 0 }, new[] { 3, 1 }, new[] { 3, 2 }, new[] { 2, 3 }, new[] { 1, 3 }, new[] { 0, 2 }, new[] { 0, 1 } };
+            int head = (int)(ms / 90) % 8;
+            for (int i = 0; i < 8; i++)
+            {
+                int age = (head - i + 8) % 8;
+                p.P(x + ring[i][0], y + ring[i][1], age < 3 ? (age == 0 ? 0xFFE9A0 : (age == 1 ? 0xE0C060 : 0x8A7438)) : 0x4A3F36);
+            }
+        }
+
+        /// <summary>The header as a column beside a standing office: the logo and the name, then the state, and the buttons below.</summary>
+        static void DrawColumn(Px p, HudModel m, long ms, ViewGeo g)
+        {
+            int x = g.ColX, y = g.Oy;
+            p.R(x - 4, y - 2, ViewGeo.ColW + 8, 46, 0x3A2E28);                  // a board of the wall behind the title
+            p.R(x - 4, y - 2, ViewGeo.ColW + 8, 1, 0x5A483D);
+            Logo(p, x, y);
+            Shadowed(p, "CLAUDE", x + 20, y, 0xF4E9D8, 1);
+            Shadowed(p, "TOGETHER", x + 20, y + 7, 0xF4E9D8, 1);
+            string sub = Clean(m.Sub), status = Clean(m.Status);
+            int chars = (ViewGeo.ColW - 2) / 4;
+            if (sub.Length > chars) sub = sub.Substring(0, Math.Max(0, chars - 1)) + "…";
+            PixelUi.Text(p, sub, x, y + 22, 0xC9B79A);
+            int sx = x;
+            if (m.Busy) { Spinner(p, sx, y + 33, ms); sx += 7; }
+            int left = (ViewGeo.ColW - (sx - x)) / 4;
+            if (status.Length > left) status = left > 1 ? status.Substring(0, left - 1) + "…" : "";
+            if (status.Length > 0) PixelUi.Text(p, status, sx, y + 32, 0xE0C060);
         }
 
         /// <summary>Draws the buttons (not while decorating).</summary>
@@ -123,6 +176,7 @@ namespace ClaudeTogether
             {
                 bool over = b.Id == hover;
                 if (b.Menu) PixelUi.MenuButton(p, b.Rect, over);
+                else if (b.Rotate) PixelUi.RotateButton(p, b.Rect, over);
                 else PixelUi.Button(p, b.Rect, b.Text, b.Primary ? PixelStyle.Primary : PixelStyle.Secondary, over, true, b.Play);
             }
         }

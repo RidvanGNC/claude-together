@@ -127,6 +127,7 @@ namespace ClaudeTogether
             floor = new FloorView();
             floor.Dock = DockStyle.Fill;
             floor.Visible = false;
+            floor.SetRotation(ViewMap.Norm(Updates.LoadSettings().View));
             floor.Act = OnCardAct;
             floor.SetOffice(Core.LoadOffice());
             floor.AddRequested = delegate(int desk) { AddNew(desk); };
@@ -138,6 +139,17 @@ namespace ClaudeTogether
                 else if (id == "menu") ShowSettings(false);
                 else if (id == "view") { classic = !classic; ApplyMode(); }
                 else if (id == "decorate") { floor.BeginEdit(); ApplyMode(); }
+                else if (id == "rotate") floor.Turn(1);
+            };
+            floor.ViewTurned = delegate
+            {
+                if (!floor.Editing)                       // decorating turns the view back by itself; that is not the player's choice
+                {
+                    AppSettings vs = Updates.LoadSettings();
+                    if (vs.View != floor.Rotation) { vs.View = floor.Rotation; Updates.SaveSettings(vs); }
+                }
+                main.FitView(floor.Rotation);
+                ApplyMode();
             };
 
             Controls.Add(flow);
@@ -179,7 +191,8 @@ namespace ClaudeTogether
         void ApplyMode()
         {
             int w = ClientSize.Width, h = ClientSize.Height;
-            bool fits = FloorView.FitScale(new Size(w, h)) >= 2 && cfg.Accounts.Count <= FloorPlan.MaxDesks;
+            bool fits = FloorFits(w, h, floor.Rotation);
+            if (!fits && floor.Rotation != 0 && FloorFits(w, h, 0)) { floor.SetRotation(0); fits = true; }     // a standing office does not fit this window
             if (!fits && floor.Editing) floor.EndEdit();
             bool useFloor = fits && (!classic || floor.Editing);
             btnView.Visible = fits && !floor.Editing;
@@ -191,6 +204,12 @@ namespace ClaudeTogether
             top.Visible = !useFloor;
             bottom.Visible = !useFloor;
             UpdateHud();
+        }
+
+        /// <summary>True when the floor, turned as given, fits the window at a readable scale (a standing office is tall, so once is enough for it).</summary>
+        bool FloorFits(int w, int h, int turns)
+        {
+            return FloorView.FitScale(new Size(w, h), turns) >= ((turns & 1) == 1 ? 1 : 2) && cfg.Accounts.Count <= FloorPlan.MaxDesks;
         }
 
         /// <summary>
@@ -218,7 +237,7 @@ namespace ClaudeTogether
                 {
                     hintTimer.Stop();
                     int cw = ClientSize.Width, ch = ClientSize.Height;
-                    bool nowFits = FloorView.FitScale(new Size(cw, ch)) >= 2 && cfg.Accounts.Count <= FloorPlan.MaxDesks;
+                    bool nowFits = FloorFits(cw, ch, floor.Rotation);
                     if (nowFits || classic || cw <= 0 || ch <= 0) return;
                     hintShown = cfg.Accounts.Count > FloorPlan.MaxDesks
                         ? Loc.T("The floor has {0} desks. More accounts are shown in the classic view.", FloorPlan.MaxDesks)
@@ -243,6 +262,7 @@ namespace ClaudeTogether
             m.DecorateText = btnDecor.Text;
             m.ShowView = true;
             m.ShowDecorate = true;
+            m.ShowRotate = true;
             floor.SetHud(m);
         }
 
@@ -455,10 +475,16 @@ namespace ClaudeTogether
             list.Add(MenuEntry.Item(Loc.T("Check for updates"), delegate { updates.CheckNow(); }));
             list.Add(MenuEntry.Toggle(Loc.T("Look for updates when the app starts"), Updates.LoadSettings().CheckOnStart, delegate
             {
-                UpdateSettings st = Updates.LoadSettings();
+                AppSettings st = Updates.LoadSettings();
                 st.CheckOnStart = !st.CheckOnStart;
                 Updates.SaveSettings(st);
             }));
+            list.Add(MenuEntry.Line());
+            string chosen = Updates.LoadSettings().Language;
+            list.Add(MenuEntry.Head(Loc.T("Language")));
+            list.Add(MenuEntry.Toggle(Loc.T("Automatic (language of Windows)"), chosen == "auto", delegate { SetLanguage("auto"); }));
+            list.Add(MenuEntry.Toggle("English", chosen == "en", delegate { SetLanguage("en"); }));
+            list.Add(MenuEntry.Toggle("Türkçe", chosen == "tr", delegate { SetLanguage("tr"); }));
             list.Add(MenuEntry.Line());
             list.Add(MenuEntry.Item(Loc.T("Show backup and profile folder"), delegate { Core.OpenFolder(Paths.Home); }));
             list.Add(MenuEntry.Item(Loc.T("Open the log file"), delegate
@@ -467,6 +493,16 @@ namespace ClaudeTogether
                 else Dlg.Info(main, Loc.T("No log yet"), Loc.T("Nothing has been logged yet."));
             }));
             return list;
+        }
+
+        /// <summary>Changes the language of the whole program: saved, then this page is built again so that every text speaks it.</summary>
+        void SetLanguage(string choice)
+        {
+            AppSettings st = Updates.LoadSettings();
+            st.Language = choice;
+            Updates.SaveSettings(st);
+            Loc.Apply(choice);
+            main.Post(delegate { main.ShowHome(); });          // not inside the click that asked for it: this page is thrown away
         }
 
         void ShowSettings(bool underButton)
@@ -478,7 +514,8 @@ namespace ClaudeTogether
             {
                 if (e.Separator) { m.Items.Add(new ToolStripSeparator()); continue; }
                 MenuEntry entry = e;
-                ToolStripMenuItem item = Menus.Item(e.Text, delegate { entry.Run(); });
+                ToolStripMenuItem item = Menus.Item(e.Text, delegate { if (entry.Run != null) entry.Run(); });
+                if (e.Header) { item.Enabled = false; item.ForeColor = Theme.Muted; }
                 if (e.Checkable) item.Checked = e.Checked;
                 m.Items.Add(item);
             }

@@ -22,11 +22,13 @@ namespace ClaudeTogether
         public long MsiBytes, ZipBytes;
     }
 
-    /// <summary>What the user chose about updates (settings.json).</summary>
-    sealed class UpdateSettings
+    /// <summary>What the user chose (settings.json): the update check, the language of the program, how the office is turned.</summary>
+    sealed class AppSettings
     {
         public bool CheckOnStart = true;
         public string SkippedVersion = "";
+        public string Language = "auto";      // auto (the language of Windows), en or tr
+        public int View;                      // how the office is turned: 0 to 3 quarter turns
     }
 
     /// <summary>How an update is put in place.</summary>
@@ -190,9 +192,9 @@ namespace ClaudeTogether
 
         // ---------- settings ----------
 
-        public static UpdateSettings LoadSettings()
+        public static AppSettings LoadSettings()
         {
-            UpdateSettings s = new UpdateSettings();
+            AppSettings s = new AppSettings();
             try
             {
                 if (!File.Exists(Paths.SettingsFile)) return s;
@@ -201,18 +203,24 @@ namespace ClaudeTogether
                 object v;
                 if (d.TryGetValue("checkForUpdates", out v) && v is bool) s.CheckOnStart = (bool)v;
                 s.SkippedVersion = Str(d, "skippedVersion");
+                string lang = Str(d, "language");
+                s.Language = lang == "en" || lang == "tr" ? lang : "auto";
+                int view;
+                if (int.TryParse(Str(d, "view"), out view) && view >= 0 && view <= 3) s.View = view;
             }
             catch (Exception) { }
             return s;
         }
 
-        public static void SaveSettings(UpdateSettings s)
+        public static void SaveSettings(AppSettings s)
         {
             try
             {
                 Dictionary<string, object> d = new Dictionary<string, object>();
                 d["checkForUpdates"] = s.CheckOnStart;
                 d["skippedVersion"] = s.SkippedVersion ?? "";
+                d["language"] = s.Language ?? "auto";
+                d["view"] = s.View;
                 Directory.CreateDirectory(Paths.Root);
                 string tmp = Paths.SettingsFile + ".tmp";
                 File.WriteAllText(tmp, new JavaScriptSerializer().Serialize(d), new UTF8Encoding(false));

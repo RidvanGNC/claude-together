@@ -22,7 +22,7 @@ namespace ClaudeTogether
             ForeColor = Theme.Text;
             Font = Theme.F(10f, false);
             ClientSize = StartSize();
-            MinimumSize = new Size(Theme.S(820), Theme.S(600));
+            MinimumSize = MinimumFor(SavedView());
             StartPosition = FormStartPosition.CenterScreen;
             DoubleBuffered = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
@@ -41,22 +41,51 @@ namespace ClaudeTogether
         /// The size the window opens with. For the floor: exactly the picture at a whole-number scale (the largest that fits the screen
         /// comfortably), so that no wall is left over round it. Other pages need the usual size.
         /// </summary>
-        static Size StartSize()
+        static Size StartSize() { return StartSize(SavedView()); }
+
+        static int SavedView()
         {
+            try { return ViewMap.Norm(Updates.LoadSettings().View); }
+            catch (Exception) { return 0; }
+        }
+
+        /// <summary>The window size for the floor turned some quarter turns: a standing office is tall, so it may be shown at its own size only.</summary>
+        static Size StartSize(int turns)
+        {
+            ViewGeo g = ViewGeo.Of(turns);
             try
             {
                 Config c = Core.Load();
                 if (c.Stage >= 5 && c.Accounts.Count > 0 && c.Accounts.Count <= FloorPlan.MaxDesks)
                 {
                     Rectangle wa = Screen.PrimaryScreen.WorkingArea;
-                    int best = 2;
+                    int best = g.Portrait ? 1 : 2;
                     for (int s = 2; s <= 6; s++)
-                        if (FloorArt.W * s <= wa.Width * 0.85 && FloorArt.H * s + Theme.S(60) <= wa.Height * 0.85) best = s;
-                    return new Size(FloorArt.W * best, FloorArt.H * best);
+                    {
+                        bool fits = g.Portrait
+                            ? g.W * s <= wa.Width && g.H * s + Theme.S(48) <= wa.Height
+                            : g.W * s <= wa.Width * 0.85 && g.H * s + Theme.S(60) <= wa.Height * 0.85;
+                        if (fits) best = s;
+                    }
+                    return new Size(g.W * best, g.H * best);
                 }
             }
             catch (Exception) { }
             return PageSize();
+        }
+
+        static Size MinimumFor(int turns) { return (turns & 1) == 1 ? new Size(Theme.S(300), Theme.S(300)) : new Size(Theme.S(820), Theme.S(600)); }
+
+        /// <summary>The floor was turned: the window takes the shape of the new picture, and stays on the screen.</summary>
+        public void FitView(int turns)
+        {
+            MinimumSize = MinimumFor(turns);
+            if (WindowState != FormWindowState.Normal) return;
+            ClientSize = StartSize(turns);
+            Rectangle wa = Screen.FromControl(this).WorkingArea;
+            Rectangle b = Bounds;
+            int x = Math.Max(wa.Left, Math.Min(b.Left, wa.Right - b.Width)), y = Math.Max(wa.Top, Math.Min(b.Top, wa.Bottom - b.Height));
+            if (x != b.Left || y != b.Top) Location = new Point(x, y);
         }
 
         /// <summary>Grows the window for a page that does not fit the floor's size, and puts it back for the home page.</summary>
@@ -74,6 +103,7 @@ namespace ClaudeTogether
             else if ((grown || ClientSize == need) && WindowState == FormWindowState.Normal)
             {
                 grown = false;
+                MinimumSize = MinimumFor(SavedView());
                 ClientSize = StartSize();
             }
         }
@@ -160,6 +190,8 @@ namespace ClaudeTogether
             if (Updates.WasAskedToApply(args))
                 return Updates.RunApplier(args, delegate(string text) { MessageBox.Show(text, "Claude Together", MessageBoxButtons.OK, MessageBoxIcon.Warning); });
             Updates.ReadStartArguments(args);
+            string saved = Updates.LoadSettings().Language;          // the language the user chose in the menu
+            if (saved == "en" || saved == "tr") Loc.Apply(saved);
             bool created;
             using (System.Threading.Mutex mutex = new System.Threading.Mutex(true, "Local\\ClaudeTogether.App", out created))
             {

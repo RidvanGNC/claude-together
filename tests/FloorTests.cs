@@ -645,5 +645,39 @@ static class FloorTests
             if (!nw.Dozing && dozeStart > 0) dozeEnd = nap.Time;
         }
         Check(dozeStart > 100 && dozeEnd - dozeStart >= 6.9 && dozeEnd - dozeStart <= 13.2 && screenStopped, "desk: after a long time of work the worker dozes off for about ten seconds, and the screen is not in use meanwhile (after " + dozeStart.ToString("F0") + " s)");
+
+        // ---------- turning the office ----------
+
+        bool bijective = true, inverseOk = true, neighboursOk = true, vectorOk = true, boundsOk2 = true;
+        for (int r = 0; r < 4; r++)
+        {
+            HashSet<int> seen = new HashSet<int>();
+            for (int x = 0; x < ViewMap.Cols; x++)
+                for (int y = 0; y < ViewMap.Rows; y++)
+                {
+                    int vx, vy, bx, by;
+                    ViewMap.Tile(r, x, y, out vx, out vy);
+                    if (vx < 0 || vx >= ViewMap.ViewCols(r) || vy < 0 || vy >= ViewMap.ViewRows(r)) boundsOk2 = false;
+                    if (!seen.Add(vx * 100 + vy)) bijective = false;
+                    ViewMap.Inverse(r, vx, vy, out bx, out by);
+                    if (bx != x || by != y) inverseOk = false;
+                    if (x + 1 < ViewMap.Cols)
+                    {
+                        int ax, ay;
+                        ViewMap.Tile(r, x + 1, y, out ax, out ay);
+                        if (Math.Abs(ax - vx) + Math.Abs(ay - vy) != 1) neighboursOk = false;
+                    }
+                    double p0x, p0y, p1x, p1y, ex, ey;
+                    ViewMap.Point(r, x + 0.5, y + 0.25, out p0x, out p0y);
+                    ViewMap.Point(r, x + 0.5 + 0.75, y + 0.25 + 0.5, out p1x, out p1y);
+                    ViewMap.Vector(r, 0.75, 0.5, out ex, out ey);
+                    if (Math.Abs((p1x - p0x) - ex) > 1e-9 || Math.Abs((p1y - p0y) - ey) > 1e-9) vectorOk = false;
+                }
+            if (seen.Count != ViewMap.Cols * ViewMap.Rows) bijective = false;
+        }
+        Check(bijective && inverseOk && neighboursOk && vectorOk && boundsOk2, "turn: every tile of the floor plan has its own place in each of the four turned pictures, neighbours stay neighbours, and the way back gives the same tile");
+        TileRect tbl = ViewMap.Rect(1, 22, 13, 5, 2), tbl2 = ViewMap.Rect(2, 22, 13, 5, 2), tbl3 = ViewMap.Rect(3, 22, 13, 5, 2);
+        Check(tbl.W == 2 && tbl.H == 5 && tbl3.W == 2 && tbl3.H == 5 && tbl2.W == 5 && tbl2.H == 2 && ViewMap.ViewCols(1) == 17 && ViewMap.ViewRows(1) == 30 && ViewMap.ViewCols(2) == 30, "turn: a table of 5 x 2 tiles stands as 2 x 5 after a quarter turn; the building 30 x 17 stands as 17 x 30");
+        Check(ViewMap.Face(1, Facing.Down) == Facing.Left && ViewMap.Face(2, Facing.Down) == Facing.Up && ViewMap.Face(3, Facing.Down) == Facing.Right && ViewMap.Face(4, Facing.Right) == Facing.Right && ViewMap.Face(1, Facing.Up) == Facing.Right && ViewMap.Face(-1, Facing.Down) == Facing.Right && ViewMap.Norm(-1) == 3, "turn: what faced south faces west, north and east after one, two and three quarter turns");
     }
 }

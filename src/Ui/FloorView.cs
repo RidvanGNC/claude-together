@@ -70,6 +70,12 @@ namespace ClaudeTogether
         /// <summary>Called with "run", "menu", "view" or "decorate" when a button of the header is clicked.</summary>
         public Action<string> HudAction;
 
+        // the view: how many quarter turns the office is turned, and the size and place of the picture that belongs to it
+        int rot, rotBeforeEdit;
+        ViewGeo geo = ViewGeo.Of(0);
+        /// <summary>Called when the office has been turned (or turned back by decorating), so the window can fit it.</summary>
+        public Action ViewTurned;
+
         HudModel hud = new HudModel();
         string hudHover;
         const int WallBoard = 14;          // width of one board of the wall that fills the window round the office, in picture pixels
@@ -81,7 +87,7 @@ namespace ClaudeTogether
             if (composite != null) { Compose(); Invalidate(); }
         }
 
-        List<HudButton> HudButtons() { return FloorHud.Buttons(hud, editing); }
+        List<HudButton> HudButtons() { return FloorHud.Buttons(hud, editing, geo); }
 
         public FloorView()
         {
@@ -199,7 +205,7 @@ namespace ClaudeTogether
             if (editing) return false;
             double cx, cy, reach;
             DoorCenter(layout.Doors[i], out cx, out cy, out reach);
-            if (mouseLogical.HasValue)
+            if (rot == 0 && mouseLogical.HasValue)
             {
                 double dx = mouseLogical.Value.X - cx, dy = mouseLogical.Value.Y - cy;
                 if (Math.Sqrt(dx * dx + dy * dy) < reach) return true;
@@ -215,7 +221,7 @@ namespace ClaudeTogether
             for (int i = 0; i < layout.Doors.Count && i < swings.Length; i++)
                 if (layout.Doors[i].Kind == DoorKind.Cabin && swings[i].Progress > 0.3) return true;
             if (crowd != null && !editing && crowd.AnyoneInToilets()) return true;
-            if (!editing && mouseLogical.HasValue)
+            if (!editing && rot == 0 && mouseLogical.HasValue)
             {
                 Rectangle t = FloorArt.ToiletArea();
                 if (t.Contains(mouseLogical.Value)) return true;
@@ -243,9 +249,40 @@ namespace ClaudeTogether
         public bool Editing { get { return editing; } }
 
         /// <summary>How many times the picture can be enlarged in an area (0 when it does not fit even once).</summary>
-        public static int FitScale(Size area)
+        public static int FitScale(Size area) { return FitScale(area, 0); }
+
+        public static int FitScale(Size area, int turns)
         {
-            return Math.Min(area.Width / FloorArt.W, area.Height / FloorArt.H);
+            ViewGeo g = ViewGeo.Of(turns);
+            return Math.Min(area.Width / g.W, area.Height / g.H);
+        }
+
+        /// <summary>How many quarter turns clockwise the office is turned (0 to 3).</summary>
+        public int Rotation { get { return rot; } }
+        /// <summary>The size of the picture as it is now turned.</summary>
+        public Size PictureSize { get { return new Size(geo.W, geo.H); } }
+
+        public void Turn(int direction) { SetRotation(rot + direction); }
+
+        /// <summary>Turns the office to a view (0 to 3 quarter turns clockwise). Decorating always happens in view 0.</summary>
+        public void SetRotation(int turns)
+        {
+            turns = ViewMap.Norm(turns);
+            if (editing && turns != 0) return;
+            if (turns == rot) return;
+            rot = turns;
+            geo = ViewGeo.Of(turns);
+            if (staticLayer != null) { staticLayer.Dispose(); staticLayer = null; }
+            if (lights != null) { lights.Dispose(); lights = null; }
+            menu = null;
+            menuHover = -1;
+            hover = -1;
+            mouseLogical = null;
+            hudHover = null;
+            Cursor = Cursors.Default;
+            Compose();
+            Invalidate();
+            if (ViewTurned != null) ViewTurned();
         }
 
         public void SetOffice(OfficeState st)
@@ -305,46 +342,108 @@ namespace ClaudeTogether
         void Compose()
         {
             if (!frozen && clockMs == 0) { clockNow = DateTime.Now; clockMs = watch.ElapsedMilliseconds; }
-            if (staticLayer == null) staticLayer = FloorArt.RenderStatic(layout, office);
+            if (staticLayer == null) staticLayer = rot == 0 ? FloorArt.RenderStatic(layout, office) : FloorArt.RenderStaticTurned(layout, office, rot);
             double hour = Daylight.Hour(clockNow);
             int step = (int)(hour * 4.0);                 // the light is made again every quarter of an hour
             if (lights == null || step != lightStep)
             {
                 if (lights != null) lights.Dispose();
-                lights = FloorArt.RenderLights(layout, hour);
+                lights = FloorArt.RenderLights(layout, hour, rot);
                 lightStep = step;
             }
             Bitmap fixedPicture = dragStatic ?? staticLayer;
-            Bitmap bmp = new Bitmap(FloorArt.W, FloorArt.H, PixelFormat.Format32bppPArgb);
+            Bitmap bmp = new Bitmap(geo.W, geo.H, PixelFormat.Format32bppPArgb);
             using (Graphics g = Graphics.FromImage(bmp))
             using (Px p = new Px(g))
             {
-                g.DrawImageUnscaled(fixedPicture, 0, 0);
-                FloorAnim.Draw(p, layout, Frame());
-                FloorArt.RedrawOverWindows(p, layout);
-                for (int i = 0; i < layout.Slots.Count; i++)
+                if (rot != 0) DrawTurned(p, fixedPicture);
+                else
                 {
-                    if (i == dragDesk) continue;
-                    DrawDeskAt(p, layout.Slots[i], i);
-                }
-                FloorArt.RedrawInFront(p, layout);
-                if (!editing && crowd != null)
+                    g.DrawImageUnscaled(fixedPicture, 0, 0);
+                    FloorAnim.Draw(p, layout, Frame());
+                    FloorArt.RedrawOverWindows(p, layout);
+                    for (int i = 0; i < layout.Slots.Count; i++)
+                    {
+                        if (i == dragDesk) continue;
+                        DrawDeskAt(p, layout.Slots[i], i);
+                    }
+                    FloorArt.RedrawInFront(p, layout);
+                    if (!editing && crowd != null)
                     {
                         FloorNpc.Stroke stroke = StrokeOf();
                         foreach (Npc n in FloorNpc.InOrder(crowd.Npcs)) if (!crowd.IsHidden(n)) FloorNpc.Draw(p, n, clockMs, n == crowd.Shooter ? stroke : null);
                     }
-                if (editing) DrawEditing(p);
+                    if (editing) DrawEditing(p);
+                }
                 g.DrawImageUnscaled(lights.Base, 0, 0);                       // the light is over the office; the interface is over the light
                 DrawFaded(g, lights.ToiletOff, lights.Toilet, 1.0 - toiletFade);
                 DrawFaded(g, lights.ToiletOn, lights.Toilet, toiletFade);
                 List<HudButton> buttons = HudButtons();
-                FloorHud.Draw(p, hud, buttons, hudHover, clockMs);
+                FloorHud.Draw(p, hud, buttons, hudHover, clockMs, geo);
                 FloorHud.DrawButtons(p, buttons, hudHover);
                 if (editing && panel != null) panel.Draw(p);
                 if (menu != null) DrawMenu(p);
             }
             if (composite != null) composite.Dispose();
             composite = bmp;
+        }
+
+        /// <summary>
+        /// The office turned: the fixed picture, then everything that stands on the floor (furniture, desks, workers) in the order of its
+        /// depth, so that a worker walks behind a cupboard and in front of a table.
+        /// </summary>
+        void DrawTurned(Px p, Bitmap fixedPicture)
+        {
+            p.G.DrawImageUnscaled(fixedPicture, 0, 0);
+            List<DepthItem> items = new List<DepthItem>();
+            FloorArt.AddStanding(items, geo, layout, crowd != null ? crowd.Pool : null);
+            for (int i = 0; i < layout.Slots.Count; i++)
+            {
+                Account a = AccountAt(i);
+                DeskView dv = new DeskView();
+                dv.Empty = a == null;
+                dv.Hover = hover == i;
+                if (a != null)
+                {
+                    dv.Name = a.Name;
+                    dv.State = StateOf(a);
+                    dv.InUse = crowd != null && crowd.SeatedAtDesk(a.Name);
+                }
+                FloorArt.AddDesk(items, geo, layout.Slots[i], dv);
+            }
+            if (crowd != null)
+            {
+                FloorNpc.Stroke stroke = StrokeOfTurned();
+                foreach (Npc n in crowd.Npcs)
+                {
+                    if (crowd.IsHidden(n)) continue;
+                    Npc worker = n;
+                    FloorNpc.Stroke st = n == crowd.Shooter ? stroke : null;
+                    double key;
+                    if (!n.Walking && n.At != null && n.Pose == Pose.Work && n.At.Desk >= 0 && n.At.Desk < layout.Slots.Count) key = FloorArt.SeatKey(geo, layout.Slots[n.At.Desk]);
+                    else { int fx, fy; geo.Point(n.X * 16.0, n.Y * 16.0, out fx, out fy); key = fy + 0.25; }
+                    items.Add(new DepthItem(key, fyTie(n), delegate(Px q) { FloorNpc.DrawView(q, worker, clockMs, st, geo, layout); }));
+                }
+            }
+            foreach (DepthItem it in items.OrderBy(q => q.Key).ThenBy(q => q.Tie)) it.Draw(p);
+        }
+
+        static int fyTie(Npc n) { return 100000 + (int)(n.X * 16.0); }
+
+        /// <summary>The stroke of the player at the pool table, in the turned picture (the ball lies on the table, 15 pixels up).</summary>
+        FloorNpc.Stroke StrokeOfTurned()
+        {
+            FloorNpc.Stroke plan = StrokeOf();
+            if (plan == null) return null;
+            FloorNpc.Stroke st = new FloorNpc.Stroke();
+            int bx, by;
+            geo.Point(plan.BallX - FloorArt.Ox, plan.BallY - FloorArt.Oy, out bx, out by);
+            st.BallX = bx; st.BallY = by - 15;
+            double dx, dy;
+            ViewMap.Vector(rot, plan.DirX, plan.DirY, out dx, out dy);
+            st.DirX = dx; st.DirY = dy;
+            st.Pull = plan.Pull;
+            return st;
         }
 
         /// <summary>Draws a piece of the light layer with the given strength (0 to 1).</summary>
@@ -426,12 +525,12 @@ namespace ClaudeTogether
             p.Frame(x, y, w * 16, h * 16, ghostWhy == Why.Ok ? 0x3DD68C : 0xF25F5C);
         }
 
-        int Scale() { return Math.Max(1, Math.Min(Width / FloorArt.W, Height / FloorArt.H)); }
+        int Scale() { return Math.Max(1, Math.Min(Width / geo.W, Height / geo.H)); }
 
         Point Origin()
         {
             int s = Scale();
-            return new Point((Width - FloorArt.W * s) / 2, (Height - FloorArt.H * s) / 2);
+            return new Point((Width - geo.W * s) / 2, (Height - geo.H * s) / 2);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -446,7 +545,7 @@ namespace ClaudeTogether
             using (ImageAttributes ia = new ImageAttributes())
             {
                 ia.SetWrapMode(WrapMode.TileFlipXY);
-                g.DrawImage(composite, new Rectangle(o.X, o.Y, FloorArt.W * s, FloorArt.H * s), 0, 0, FloorArt.W, FloorArt.H, GraphicsUnit.Pixel, ia);
+                g.DrawImage(composite, new Rectangle(o.X, o.Y, geo.W * s, geo.H * s), 0, 0, geo.W, geo.H, GraphicsUnit.Pixel, ia);
             }
         }
 
@@ -484,6 +583,16 @@ namespace ClaudeTogether
         int DeskAt(Point m)
         {
             Point l = Logical(m);
+            if (rot != 0)
+            {
+                for (int i = 0; i < layout.Slots.Count; i++)
+                {
+                    Slot sl = layout.Slots[i];
+                    Rectangle table = geo.Rect(sl.X * 16, sl.Y * 16 + 2, 32, 12), chair = geo.Rect(sl.X * 16, sl.Y * 16 + 16, 16, 16);
+                    if (new Rectangle(table.X, table.Y - 22, table.Width, table.Height + 22).Contains(l) || new Rectangle(chair.X, chair.Y - 17, chair.Width, chair.Height + 17).Contains(l)) return i;
+                }
+                return -1;
+            }
             for (int i = 0; i < layout.Slots.Count; i++)
             {
                 Slot sl = layout.Slots[i];
@@ -535,9 +644,14 @@ namespace ClaudeTogether
             mouseLogical = Logical(e.Location);
             string hb = FloorHud.ButtonAt(HudButtons(), mouseLogical.Value);
             if (hb != hudHover) { hudHover = hb; Cursor = hb != null ? Cursors.Hand : Cursors.Default; Compose(); Invalidate(); }
-            if (hb != null) return;
+            string buttonTip = hb == "rotate" ? Loc.T("Turn the office (R)") : "";
+            if (hb != null || tipText == Loc.T("Turn the office (R)"))
+            {
+                if (buttonTip != tipText) { tipText = buttonTip; tip.SetToolTip(this, buttonTip); }
+                if (hb != null) return;
+            }
             int h = DeskAt(e.Location);
-            string thing = FloorAnim.KeyAt(layout, Tile(mouseLogical.Value.X, FloorArt.Ox), Tile(mouseLogical.Value.Y, FloorArt.Oy));
+            string thing = rot != 0 ? null : FloorAnim.KeyAt(layout, Tile(mouseLogical.Value.X, FloorArt.Ox), Tile(mouseLogical.Value.Y, FloorArt.Oy));
             Cursor = h >= 0 || thing != null ? Cursors.Hand : Cursors.Default;
             if (h == hover) return;
             hover = h;
@@ -586,7 +700,7 @@ namespace ClaudeTogether
             {
                 if (e.Button != MouseButtons.Left) return;
                 Point lp = Logical(e.Location);
-                string key = FloorAnim.KeyAt(layout, Tile(lp.X, FloorArt.Ox), Tile(lp.Y, FloorArt.Oy));
+                string key = rot != 0 ? null : FloorAnim.KeyAt(layout, Tile(lp.X, FloorArt.Ox), Tile(lp.Y, FloorArt.Oy));
                 if (key != null)       // a tap, the coffee machine, an arcade game: it runs for a while
                 {
                     active.Activate(key, frozen ? clockMs : watch.ElapsedMilliseconds, FloorAnim.Duration(key));
@@ -622,8 +736,9 @@ namespace ClaudeTogether
             w += 8 + 9 + 8;                                              // room for the check box and the margins
             int h = 8;
             foreach (MenuEntry m in entries) h += m.Separator ? MenuLine : MenuRow;
-            int right = FloorArt.Ox + FloorPlan.Cols * 16 - 2;
-            menuBox = new Rectangle(right - w, 8 + PixelUi.ButtonH + 2, w, h);
+            int right = geo.HeaderRight;
+            int top = (geo.Portrait ? geo.Oy + 1 : 8) + PixelUi.ButtonH + 2;
+            menuBox = new Rectangle(Math.Max(2, right - w), top, w, h);
             Cursor = Cursors.Default;
             Compose();
             Invalidate();
@@ -644,7 +759,7 @@ namespace ClaudeTogether
             for (int i = 0; i < menu.Count; i++)
             {
                 int h = menu[i].Separator ? MenuLine : MenuRow;
-                if (at.Y >= y && at.Y < y + h) return menu[i].Separator ? -1 : i;
+                if (at.Y >= y && at.Y < y + h) return menu[i].Separator || menu[i].Header ? -1 : i;
                 y += h;
             }
             return -1;
@@ -689,7 +804,7 @@ namespace ClaudeTogether
                     p.R(menuBox.X + 7, ty, 5, 1, 0x6E5E52); p.R(menuBox.X + 7, ty, 1, 5, 0x6E5E52); p.R(menuBox.X + 11, ty, 1, 5, 0x6E5E52); p.R(menuBox.X + 7, ty + 4, 5, 1, 0x6E5E52);
                     if (m.Checked) { p.R(menuBox.X + 8, ty + 2, 1, 2, PixelUi.Gold); p.R(menuBox.X + 9, ty + 3, 1, 1, PixelUi.Gold); p.R(menuBox.X + 10, ty + 1, 1, 2, PixelUi.Gold); }
                 }
-                PixelUi.Text(p, m.Text, menuBox.X + 8 + 9, ty, i == menuHover ? 0xFFFFFF : PixelUi.Ink);
+                PixelUi.Text(p, m.Text, menuBox.X + 8 + (m.Header ? 0 : 9), ty, m.Header ? PixelUi.Gold : (i == menuHover ? 0xFFFFFF : PixelUi.Ink));
                 y += MenuRow;
             }
         }
@@ -700,6 +815,8 @@ namespace ClaudeTogether
         {
             if (editing) return;
             editing = true;
+            rotBeforeEdit = rot;
+            if (rot != 0) SetRotation(0);              // decorating happens in the usual view
             hover = -1;
             Cursor = Cursors.Default;
             selDesk = selItem = -1;
@@ -721,6 +838,7 @@ namespace ClaudeTogether
             Cursor = Cursors.Default;
             Compose();
             Invalidate();
+            if (rotBeforeEdit != 0) { int back = rotBeforeEdit; rotBeforeEdit = 0; SetRotation(back); }
             if (EditEnded != null) EditEnded();
         }
 
@@ -940,7 +1058,11 @@ namespace ClaudeTogether
         {
             base.OnKeyDown(e);
             if (menu != null) { if (e.KeyCode == Keys.Escape) CloseMenu(); return; }
-            if (!editing) return;
+            if (!editing)
+            {
+                if (e.KeyCode == Keys.R) Turn(e.Shift ? -1 : 1);
+                return;
+            }
             if (e.KeyCode == Keys.R) TurnSelected();
             else if (e.KeyCode == Keys.Delete) RemoveSelected();
             else if (e.KeyCode == Keys.Escape)

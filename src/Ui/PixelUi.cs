@@ -56,6 +56,17 @@ namespace ClaudeTogether
             for (int i = 0; i < 3; i++) p.R(x, y + i * 2, 7, 1, Ink);       // rows 0, 2 and 4: the same band as the letters
         }
 
+        /// <summary>The button that turns the office: a circle with an arrow head.</summary>
+        public static void RotateButton(Px p, Rectangle r, bool hover)
+        {
+            Face(p, r, PixelStyle.Secondary, hover, true);
+            string[] icon = { ".###.#.", "#...###", "#....#.", "#.....#", ".#####." };
+            int x = r.X + (r.Width - 7) / 2, y = ContentY(r);
+            for (int j = 0; j < 5; j++)
+                for (int i = 0; i < 7; i++)
+                    if (icon[j][i] == '#') p.P(x + i, y + j, Ink);
+        }
+
         static void Face(Px p, Rectangle r, PixelStyle style, bool hover, bool enabled)
         {
             bool primary = style == PixelStyle.Primary && enabled;
@@ -117,10 +128,12 @@ namespace ClaudeTogether
     {
         public string Text;
         public Action Run;
-        public bool Separator, Checkable, Checked;
+        public bool Separator, Checkable, Checked, Header;
 
         public static MenuEntry Item(string text, Action run) { MenuEntry e = new MenuEntry(); e.Text = text; e.Run = run; return e; }
         public static MenuEntry Toggle(string text, bool on, Action run) { MenuEntry e = Item(text, run); e.Checkable = true; e.Checked = on; return e; }
+        /// <summary>A line of dim text that cannot be chosen: names a group of entries.</summary>
+        public static MenuEntry Head(string text) { MenuEntry e = new MenuEntry(); e.Text = text; e.Header = true; return e; }
         public static MenuEntry Line() { MenuEntry e = new MenuEntry(); e.Separator = true; return e; }
     }
 }

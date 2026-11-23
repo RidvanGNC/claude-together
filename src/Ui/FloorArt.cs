@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 namespace ClaudeTogether
 {
     /// <summary>All the pixel art of the office floor, drawn in code. Nothing here is loaded from a file.</summary>
-    static class FloorArt
+    static partial class FloorArt
     {
         // The picture is 496 x 304 pixels: the header (28 pixels), then the 30 x 17 tile floor with a thin transparent margin around the walls.
         public const int Hud = 28;                       // the header above the office (logo, name, buttons)
@@ -22,7 +22,10 @@ namespace ClaudeTogether
         public const int H = Oy + FloorPlan.Rows * 16 - (16 - StripPixels) + 8;
 
         internal static int X(int tx) { return Ox + tx * 16; }
-        internal static int Y(int ty) { return Oy + ty * 16 - (ty >= FloorPlan.Rows ? 16 - StripPixels : 0); }
+        /// <summary>Set while the floor is drawn for a turned picture: then the last row is a whole tile like the others.</summary>
+        static bool noStrip;
+
+        internal static int Y(int ty) { return Oy + ty * 16 - (ty >= FloorPlan.Rows && !noStrip ? 16 - StripPixels : 0); }
 
         static int Hash(int x, int y)
         {
@@ -298,7 +301,7 @@ namespace ClaudeTogether
         }
 
         /// <summary>Draws a piece of furniture with the top left of its footprint at pixel (px, py).</summary>
-        static void DrawPropAt(Px p, Prop pr, int px, int py)
+        internal static void DrawPropAt(Px p, Prop pr, int px, int py)
         {
             if ((pr.Rot & 1) == 1) { DrawTurned(p, pr, px, py); return; }
             int w = pr.W * 16, h = pr.H * 16;
@@ -1172,6 +1175,31 @@ namespace ClaudeTogether
             }
         }
 
+        /// <summary>The same light for the office turned r quarter turns: made flat, then turned like the floor.</summary>
+        public static LightSet RenderLights(Layout l, double hour, int r)
+        {
+            if (ViewMap.Norm(r) == 0) return RenderLights(l, hour);
+            ViewGeo g = ViewGeo.Of(r);
+            Bitmap on, off;
+            noStrip = true;
+            try { on = Layer(l, hour, true); off = Layer(l, hour, false); }
+            finally { noStrip = false; }
+            Bitmap onT = TurnBuilding(on, g), offT = TurnBuilding(off, g);
+            on.Dispose(); off.Dispose();
+            LightSet set = new LightSet();
+            set.Toilet = g.Rect(18 * 16, 5 * 16, 12 * 16, 5 * 16);
+            set.ToiletOn = onT.Clone(set.Toilet, onT.PixelFormat);
+            set.ToiletOff = offT.Clone(set.Toilet, offT.PixelFormat);
+            using (Graphics gr = Graphics.FromImage(offT))
+            {
+                gr.CompositingMode = CompositingMode.SourceCopy;
+                using (SolidBrush clear = new SolidBrush(Color.FromArgb(0, 0, 0, 0))) gr.FillRectangle(clear, set.Toilet);
+            }
+            onT.Dispose();
+            set.Base = offT;
+            return set;
+        }
+
         public static LightSet RenderLights(Layout l, double hour)
         {
             Bitmap on = Layer(l, hour, true), off = Layer(l, hour, false);
@@ -1237,9 +1265,10 @@ namespace ClaudeTogether
             float shade = (float)(58.0 + 54.0 * night);   // strength of the blue shade away from lights (0 to 255)
             float toiletShade = shade + 50f;               // with the lights off the toilets are darker, but things stay visible
             const int steps = 5;
-            int[] buf = new int[W * H];
-            for (int y = 0; y < H; y++)
-                for (int x = 0; x < W; x++)
+            int lw = W, lh = noStrip ? H + (16 - StripPixels) : H;
+            int[] buf = new int[lw * lh];
+            for (int y = 0; y < lh; y++)
+                for (int x = 0; x < lw; x++)
                 {
                     if (!building.Contains(x, y)) continue;               // the margin around the walls stays clear
                     float sum = 0f, r = 0f, g = 0f, b = 0f;
@@ -1278,11 +1307,11 @@ namespace ClaudeTogether
                         pb += (int)(b / sum * tintAlpha / 255f * keep);
                         outA = a + (int)(tintAlpha * keep);
                     }
-                    buf[y * W + x] = (outA << 24) | (Math.Min(outA, pr) << 16) | (Math.Min(outA, pg) << 8) | Math.Min(outA, pb);
+                    buf[y * lw + x] = (outA << 24) | (Math.Min(outA, pr) << 16) | (Math.Min(outA, pg) << 8) | Math.Min(outA, pb);
                 }
 
-            Bitmap bmp = new Bitmap(W, H, PixelFormat.Format32bppPArgb);
-            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, W, H), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+            Bitmap bmp = new Bitmap(lw, lh, PixelFormat.Format32bppPArgb);
+            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, lw, lh), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
             Marshal.Copy(buf, 0, bd.Scan0, buf.Length);
             bmp.UnlockBits(bd);
             return bmp;

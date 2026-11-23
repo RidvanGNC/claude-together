@@ -200,7 +200,7 @@ namespace ClaudeTogether
         void Offer(ReleaseInfo r, bool asked)
         {
             if (running && !asked) return;
-            UpdateSettings st = Updates.LoadSettings();
+            AppSettings st = Updates.LoadSettings();
             if (!asked && st.SkippedVersion == r.Tag) return;
             InstallKind kind = KindHere();
             bool canInstall = (kind == InstallKind.Msi ? r.MsiUrl : r.ZipUrl) != null && r.SumsUrl != null;
