@@ -281,14 +281,17 @@ namespace ClaudeTogether
         static readonly int[] BallColors = { 0xF5F5F5, 0xE0C060, 0x3B7BD6, 0xE04444, 0x7A4FD0, 0xE08A2C, 0x2E9E4F, 0x8A3A2E, 0x1B1B1B, 0xE0C060, 0x3B7BD6 };
 
         /// <summary>The balls on the table, where the game has them: racked, rolling, resting, or gone into a pocket.</summary>
-        static void Table(Px p, int px, int py, int w, int h, AnimFrame f)
+        static void Table(Px p, int px, int py, int w, int h, AnimFrame f) { TableBalls(p, px, py, w, h, f.Pool); }
+
+        /// <summary>The felt with its balls and the pockets, for any picture (also the turned views, which turn this picture).</summary>
+        internal static void TableBalls(Px p, int px, int py, int w, int h, PoolGame pool)
         {
-            if (f.Pool == null) return;
+            if (pool == null) return;
             p.G.SetClip(new Rectangle(px + 5, py + 6, w - 10, 18));            // the felt only
             FloorArt.Felt(p, px, py, w, h);
             for (int i = PoolGame.Balls - 1; i >= 0; i--)
             {
-                PoolGame.Ball b = f.Pool.Table[i];
+                PoolGame.Ball b = pool.Table[i];
                 if (b.Potted) continue;
                 int bx = px + (int)Math.Round(b.X - 1.5), by = py + (int)Math.Round(b.Y - 1.5);
                 p.RA(bx + 1, by + 2, 3, 2, 0x000000, 60);

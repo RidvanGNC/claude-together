@@ -869,6 +869,18 @@ namespace ClaudeTogether
                 p.R(px + lx, py + h - 9, 5, 8, 0x3A2412);
                 p.R(px + lx, py + h - 9, 5, 2, 0x5A3B1F);
             }
+            BilliardTop(p, px, py, w, h);
+            // pendant lamp over the table
+            p.R(px + w / 2, py - 18, 1, 8, 0x1B1B1B);
+            p.R(px + w / 2 - 10, py - 10, 21, 3, 0x2F6B4A);
+            p.R(px + w / 2 - 13, py - 7, 27, 4, 0x3B8A60);
+            p.R(px + w / 2 - 13, py - 7, 27, 1, 0x5CB584);
+            p.R(px + w / 2 - 11, py - 3, 23, 1, 0xFFE9B0);
+        }
+
+        /// <summary>The top of the pool table: wooden frame with its diamonds and chalk, felt and pockets. Also drawn on its own for the turned views.</summary>
+        internal static void BilliardTop(Px p, int px, int py, int w, int h)
+        {
             p.R(px, py + 2, w, 26, 0x6B3E26);                         // wooden frame
             p.R(px, py + 2, w, 2, 0x8B5A3A);
             p.R(px, py + 26, w, 2, 0x4F2C19);
@@ -883,12 +895,6 @@ namespace ClaudeTogether
             Felt(p, px, py, w, h);
             Pockets(p, px, py, w, h);
             p.R(px + 62, py + 2, 3, 2, 0x3B7BD6);                     // chalk on the rail
-            // pendant lamp over the table
-            p.R(px + w / 2, py - 18, 1, 8, 0x1B1B1B);
-            p.R(px + w / 2 - 10, py - 10, 21, 3, 0x2F6B4A);
-            p.R(px + w / 2 - 13, py - 7, 27, 4, 0x3B8A60);
-            p.R(px + w / 2 - 13, py - 7, 27, 1, 0x5CB584);
-            p.R(px + w / 2 - 11, py - 3, 23, 1, 0xFFE9B0);
         }
 
         static void Arcade(Px p, int px, int py, int v)
