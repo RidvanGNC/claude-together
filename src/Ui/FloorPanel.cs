@@ -3,211 +3,234 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Windows.Forms;
 
 namespace ClaudeTogether
 {
-    /// <summary>A button that shows a small pixel picture: a thing to place, a floor or a wallpaper.</summary>
-    class SwatchButton : Control
+    /// <summary>
+    /// The panel of the decorating mode, in pixel art like the rest of the floor: it is drawn into the picture over the rooms on the right
+    /// (which cannot be changed yet) and reacts to the mouse in picture pixels. The floor view asks it where the mouse is and what was clicked.
+    /// </summary>
+    sealed class FloorPanel : IDisposable
     {
-        public Bitmap Image;
-        public bool Selected;
-        bool over;
-
-        public SwatchButton(Bitmap image)
+        sealed class Area
         {
-            Image = image;
-            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
-            Cursor = Cursors.Hand;
+            public Rectangle R;
+            public string Kind;       // floor, wall, thing, remove, reset, done
+            public int Index;
+            public string Name;       // what the mouse shows when it is over it
         }
 
-        protected override void OnMouseEnter(EventArgs e) { base.OnMouseEnter(e); over = true; Invalidate(); }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); over = false; Invalidate(); }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            Graphics g = e.Graphics;
-            g.Clear(Parent != null ? Parent.BackColor : Theme.Surface);
-            Gfx.Smooth(g);
-            RectangleF r = new RectangleF(1f, 1f, Width - 2.5f, Height - 2.5f);
-            using (GraphicsPath path = Gfx.RR(r, Theme.S(8)))
-            {
-                using (SolidBrush b = new SolidBrush(over ? Theme.Surface2 : Theme.Bg)) g.FillPath(b, path);
-                using (Pen pen = new Pen(Selected ? Theme.Accent : (over ? Theme.Muted : Theme.Border), Selected ? 2f : 1f)) g.DrawPath(pen, path);
-            }
-            if (Image == null) return;
-            int s = Math.Max(1, Math.Min((Width - 6) / Image.Width, (Height - 6) / Image.Height));
-            int w = Image.Width * s, h = Image.Height * s;
-            g.InterpolationMode = InterpolationMode.NearestNeighbor;
-            g.PixelOffsetMode = PixelOffsetMode.Half;
-            g.DrawImage(Image, new Rectangle((Width - w) / 2, (Height - h) / 2, w, h), 0, 0, Image.Width, Image.Height, GraphicsUnit.Pixel);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing && Image != null) Image.Dispose();
-            base.Dispose(disposing);
-        }
-    }
-
-    /// <summary>The side panel of the decorating mode. It sits over the rooms on the right, which cannot be changed yet.</summary>
-    class FloorPanel : Panel
-    {
         readonly FloorView owner;
-        readonly ToolTip tip = new ToolTip();
-        readonly Label title = new Label(), hint = new Label(), lblFloor = new Label(), lblWall = new Label(), lblThings = new Label(), lblSel = new Label(), lblMsg = new Label();
-        readonly List<SwatchButton> floors = new List<SwatchButton>(), walls = new List<SwatchButton>(), things = new List<SwatchButton>();
-        readonly RoundBtn btnRemove = new RoundBtn(), btnReset = new RoundBtn(), btnDone = new RoundBtn();
+        readonly List<Bitmap> floors = new List<Bitmap>(), walls = new List<Bitmap>(), things = new List<Bitmap>();
+        string hover = "";            // "kind:index" of the area under the mouse
+        string message = "";
+
+        static readonly int Left = FloorArt.Ox + 18 * 16 + 8, Top = FloorArt.Oy - 2, Width = 12 * 16 - 8;
+
+        /// <summary>The frame of the panel: as tall as what is in it (a longer hint in another language makes it taller).</summary>
+        public Rectangle Bounds
+        {
+            get
+            {
+                int a, b, bottom;
+                Layout(out a, out b, out bottom);
+                return new Rectangle(Left, Top, Width, bottom - Top);
+            }
+        }
 
         public FloorPanel(FloorView view)
         {
             owner = view;
-            BackColor = Theme.Surface;
-            AutoScroll = true;
-            UiWin.DarkScroll(this);
+            foreach (string f in OfficeStyles.Floors) floors.Add(FloorArt.FloorSwatch(f));
+            foreach (string w in OfficeStyles.Wallpapers) walls.Add(FloorArt.WallSwatch(w));
+            foreach (DecorKind k in Decorating.Catalog) things.Add(Thumb(FloorArt.Icon(k)));
+        }
 
-            Head(title, Loc.T("Decorate the office"), 13f, true, Theme.Text);
-            Head(hint, Loc.T("Drag desks and things to move them. Choose something below to add it, right-click to remove it, press R to turn it. Nothing can stand in front of the doors."), 9f, false, Theme.Muted);
-            Head(lblFloor, Loc.T("Floor"), 9.5f, true, Theme.Muted);
-            Head(lblWall, Loc.T("Wallpaper"), 9.5f, true, Theme.Muted);
-            Head(lblThings, Loc.T("Things"), 9.5f, true, Theme.Muted);
-            Head(lblSel, "", 9.5f, false, Theme.Text);
-            Head(lblMsg, "", 9f, false, Theme.Warn);
-
-            for (int i = 0; i < OfficeStyles.Floors.Length; i++)
+        /// <summary>A thing's picture made small enough for its cell (smoothed, since it is only a preview).</summary>
+        static Bitmap Thumb(Bitmap big)
+        {
+            double scale = Math.Min(1.0, Math.Min(24.0 / big.Width, 24.0 / big.Height));
+            int w = Math.Max(1, (int)Math.Round(big.Width * scale)), h = Math.Max(1, (int)Math.Round(big.Height * scale));
+            Bitmap small = new Bitmap(24, 24, System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(small))
             {
-                string key = OfficeStyles.Floors[i];
-                SwatchButton b = new SwatchButton(FloorArt.FloorSwatch(key));
-                b.Click += delegate { owner.SetFloor(key); };
-                tip.SetToolTip(b, Loc.T(OfficeStyles.FloorNames[i]));
-                floors.Add(b);
-                Controls.Add(b);
+                g.InterpolationMode = scale < 1.0 ? InterpolationMode.HighQualityBicubic : InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(big, new Rectangle((24 - w) / 2, (24 - h) / 2, w, h), 0, 0, big.Width, big.Height, GraphicsUnit.Pixel);
             }
-            for (int i = 0; i < OfficeStyles.Wallpapers.Length; i++)
+            big.Dispose();
+            return small;
+        }
+
+        public bool Contains(Point logical) { return Bounds.Contains(logical); }
+
+        // ---------- where everything is ----------
+
+        const int Inner = 168;        // width of the part inside the frame
+
+        List<Area> Layout(out int selectedY, out int messageY, out int bottom)
+        {
+            List<Area> areas = new List<Area>();
+            int x0 = Left + 8, y = Top + 8;
+            y += 14;                                                           // the title
+            y += PixelUi.Wrap(Loc.T("Drag desks and things to move them. Choose something below to add it, right-click to remove it, press R to turn it. Nothing can stand in front of the doors."), Inner / 4).Count * 7 + 5;
+            y += 8;                                                            // "Floor"
+            for (int i = 0; i < floors.Count; i++) areas.Add(new Area { R = new Rectangle(x0 + i * 28, y, 28, 28), Kind = "floor", Index = i, Name = Loc.T(OfficeStyles.FloorNames[i]) });
+            y += 28 + 5 + 8;                                                   // "Wallpaper"
+            for (int i = 0; i < walls.Count; i++) areas.Add(new Area { R = new Rectangle(x0 + i * 28, y, 28, 20), Kind = "wall", Index = i, Name = Loc.T(OfficeStyles.WallpaperNames[i]) });
+            y += 20 + 5 + 8;                                                   // "Things"
+            for (int i = 0; i < things.Count; i++) areas.Add(new Area { R = new Rectangle(x0 + (i % 6) * 28, y + (i / 6) * 28, 28, 28), Kind = "thing", Index = i, Name = Loc.T(Decorating.Catalog[i].Name) });
+            y += ((things.Count + 5) / 6) * 28 + 6;
+            selectedY = y;
+            y += 9;
+            messageY = y;
+            y += 16;
+            string remove = Loc.T("Remove"), reset = Loc.T("Reset the office"), done = Loc.T("Done");
+            int dw = PixelUi.ButtonWidth(done, false), rw = PixelUi.ButtonWidth(reset, false), mw = PixelUi.ButtonWidth(remove, false);
+            int right = x0 + Inner;
+            areas.Add(new Area { R = new Rectangle(right - dw, y, dw, PixelUi.ButtonH), Kind = "done", Name = "" });
+            right -= dw + 4;
+            areas.Add(new Area { R = new Rectangle(right - rw, y, rw, PixelUi.ButtonH), Kind = "reset", Name = "" });
+            right -= rw + 4;
+            areas.Add(new Area { R = new Rectangle(right - mw, y, mw, PixelUi.ButtonH), Kind = "remove", Name = "" });
+            bottom = y + PixelUi.ButtonH + 10;
+            return areas;
+        }
+
+        Area Find(Point logical)
+        {
+            int a, b, c;
+            foreach (Area ar in Layout(out a, out b, out c)) if (ar.R.Contains(logical)) return ar;
+            return null;
+        }
+
+        // ---------- the mouse ----------
+
+        /// <summary>The mouse moved over the panel. True when something to redraw changed.</summary>
+        public bool Move(Point logical)
+        {
+            Area a = Find(logical);
+            string now = a == null ? "" : a.Kind + ":" + a.Index;
+            if (a != null && a.Kind == "remove" && !owner.CanRemoveSelected) now = "";
+            if (now == hover) return false;
+            hover = now;
+            return true;
+        }
+
+        public bool Clickable(Point logical)
+        {
+            Area a = Find(logical);
+            return a != null && !(a.Kind == "remove" && !owner.CanRemoveSelected);
+        }
+
+        public void Leave() { hover = ""; }
+
+        public void Click(Point logical)
+        {
+            Area a = Find(logical);
+            if (a == null) return;
+            message = "";
+            switch (a.Kind)
             {
-                string key = OfficeStyles.Wallpapers[i];
-                SwatchButton b = new SwatchButton(FloorArt.WallSwatch(key));
-                b.Click += delegate { owner.SetWallpaper(key); };
-                tip.SetToolTip(b, Loc.T(OfficeStyles.WallpaperNames[i]));
-                walls.Add(b);
-                Controls.Add(b);
+                case "floor": owner.SetFloor(OfficeStyles.Floors[a.Index]); break;
+                case "wall": owner.SetWallpaper(OfficeStyles.Wallpapers[a.Index]); break;
+                case "thing": owner.StartPlacing(Decorating.Catalog[a.Index]); break;
+                case "remove": if (owner.CanRemoveSelected) owner.RemoveSelected(); break;
+                case "reset": owner.AskReset(); break;
+                case "done": owner.EndEdit(); break;
             }
-            foreach (DecorKind k in Decorating.Catalog)
-            {
-                DecorKind kind = k;
-                SwatchButton b = new SwatchButton(FloorArt.Icon(kind));
-                b.Click += delegate { owner.StartPlacing(kind); };
-                tip.SetToolTip(b, Loc.T(kind.Name));
-                things.Add(b);
-                Controls.Add(b);
-            }
-
-            btnRemove.Kind = BtnKind.Secondary;
-            btnRemove.Text = Loc.T("Remove");
-            btnRemove.BackColor = Theme.Surface;
-            btnRemove.Click += delegate { owner.RemoveSelected(); };
-            btnReset.Kind = BtnKind.Secondary;
-            btnReset.Text = Loc.T("Reset the office");
-            btnReset.BackColor = Theme.Surface;
-            btnReset.Click += delegate
-            {
-                if (Dlg.Ask(FindForm(), Loc.T("Reset the office?"), Loc.T("Desks, decorations, floor and wallpaper go back to the start. Accounts keep a desk."), Loc.T("Reset"), Loc.T("Cancel")))
-                    owner.ResetOffice();
-            };
-            btnDone.Kind = BtnKind.Primary;
-            btnDone.Text = Loc.T("Done");
-            btnDone.BackColor = Theme.Surface;
-            btnDone.Click += delegate { owner.EndEdit(); };
-            Controls.Add(btnRemove);
-            Controls.Add(btnReset);
-            Controls.Add(btnDone);
-
-            LayoutAll();
-            RefreshSelection();
         }
 
-        void Head(Label l, string text, float pt, bool bold, Color color)
-        {
-            l.Text = text;
-            l.Font = Theme.F(pt, bold);
-            l.ForeColor = color;
-            l.BackColor = Theme.Surface;
-            l.AutoSize = false;
-            Controls.Add(l);
-        }
+        // ---------- what the panel says ----------
 
-        protected override void OnResize(EventArgs eventargs)
-        {
-            base.OnResize(eventargs);
-            if (btnDone != null) LayoutAll();
-        }
-
-        void Row(List<SwatchButton> list, int columns, int y, int bh, int pad, int gap, int w)
-        {
-            int bw = (w - gap * (columns - 1)) / columns;
-            for (int i = 0; i < list.Count; i++)
-                list[i].SetBounds(pad + (i % columns) * (bw + gap), y + (i / columns) * (bh + gap), bw, bh);
-        }
-
-        void LayoutAll()
-        {
-            int pad = Theme.S(12), gap = Theme.S(6);
-            int w = ClientSize.Width - 2 * pad;
-            if (w < Theme.S(200)) return;
-            int y = pad;
-            title.SetBounds(pad, y, w, Theme.S(26)); y += Theme.S(28);
-            hint.SetBounds(pad, y, w, Theme.S(50)); y += Theme.S(52);
-            lblFloor.SetBounds(pad, y, w, Theme.S(18)); y += Theme.S(20);
-            Row(floors, floors.Count, y, Theme.S(54), pad, gap, w); y += Theme.S(54) + gap;
-            lblWall.SetBounds(pad, y, w, Theme.S(18)); y += Theme.S(20);
-            Row(walls, walls.Count, y, Theme.S(40), pad, gap, w); y += Theme.S(40) + gap;
-            lblThings.SetBounds(pad, y, w, Theme.S(18)); y += Theme.S(20);
-            int rows = (things.Count + 5) / 6;
-            Row(things, 6, y, Theme.S(78), pad, gap, w); y += rows * (Theme.S(78) + gap) + Theme.S(2);
-            btnRemove.SetBounds(pad + w - Theme.S(100), y, Theme.S(100), Theme.S(34));
-            lblSel.SetBounds(pad, y + Theme.S(7), w - Theme.S(108), Theme.S(22)); y += Theme.S(36);
-            lblMsg.SetBounds(pad, y, w, Theme.S(22)); y += Theme.S(26);
-            int half = (w - gap) / 2;
-            btnReset.SetBounds(pad, y, half, Theme.S(38));
-            btnDone.SetBounds(pad + half + gap, y, w - half - gap, Theme.S(38));
-            AutoScrollMinSize = new Size(0, y + Theme.S(38) + pad);
-        }
-
-        /// <summary>Brings the highlights, the selected name and the Remove button up to date.</summary>
-        public void RefreshSelection()
-        {
-            for (int i = 0; i < floors.Count; i++) floors[i].Selected = OfficeStyles.Floors[i] == owner.Office.Floor;
-            for (int i = 0; i < walls.Count; i++) walls[i].Selected = OfficeStyles.Wallpapers[i] == owner.Office.Wallpaper;
-            for (int i = 0; i < things.Count; i++) things[i].Selected = owner.Placing == Decorating.Catalog[i];
-            foreach (SwatchButton b in floors) b.Invalidate();
-            foreach (SwatchButton b in walls) b.Invalidate();
-            foreach (SwatchButton b in things) b.Invalidate();
-            string name = owner.SelectionName();
-            lblSel.Text = name.Length > 0 ? Loc.T("Selected: {0}", name) : Loc.T("Nothing is selected.");
-            btnRemove.Enabled = owner.CanRemoveSelected;
-            lblMsg.Text = "";
-        }
+        /// <summary>The selection changed: an old message is no longer true.</summary>
+        public void RefreshSelection() { message = ""; }
 
         /// <summary>Tells the player why something cannot go where they tried.</summary>
         public void Say(Why why)
         {
-            string text = "";
             switch (why)
             {
-                case Why.Outside: text = Loc.T("That spot is outside the office floor."); break;
-                case Why.Overlap: text = Loc.T("Something is already there."); break;
-                case Why.Doors: text = Loc.T("Nothing can stand in front of the doors."); break;
-                case Why.Gap: text = Loc.T("Leave a gap so people can walk between the desks."); break;
-                case Why.Blocked: text = Loc.T("That would block the way."); break;
-                case Why.TooMany: text = Loc.T("The office is full of decorations."); break;
+                case Why.Outside: message = Loc.T("That spot is outside the office floor."); break;
+                case Why.Overlap: message = Loc.T("Something is already there."); break;
+                case Why.Doors: message = Loc.T("Nothing can stand in front of the doors."); break;
+                case Why.Gap: message = Loc.T("Leave a gap so people can walk between the desks."); break;
+                case Why.Blocked: message = Loc.T("That would block the way."); break;
+                case Why.TooMany: message = Loc.T("The office is full of decorations."); break;
+                default: message = ""; break;
             }
-            lblMsg.Text = text;
         }
 
-        protected override void Dispose(bool disposing)
+        // ---------- drawing ----------
+
+        void Label(Px p, string text, int x, int y) { PixelUi.Text(p, text, x, y, PixelUi.Dim); }
+
+        public void Draw(Px p)
         {
-            if (disposing) tip.Dispose();
-            base.Dispose(disposing);
+            Rectangle b = Bounds;
+            PixelUi.Panel(p, b);
+            int x0 = b.X + 8, y = b.Y + 8;
+            PixelUi.Text(p, Loc.T("Decorate the office"), x0 + 1, y + 1, 0x241A15, 2);
+            PixelUi.Text(p, Loc.T("Decorate the office"), x0, y, 0xF4E9D8, 2);
+            y += 14;
+            foreach (string line in PixelUi.Wrap(Loc.T("Drag desks and things to move them. Choose something below to add it, right-click to remove it, press R to turn it. Nothing can stand in front of the doors."), Inner / 4))
+            {
+                PixelUi.Text(p, line, x0, y, PixelUi.Dim);
+                y += 7;
+            }
+            y += 5;
+
+            int selectedY, messageY, bottomY;
+            List<Area> areas = Layout(out selectedY, out messageY, out bottomY);
+            Label(p, Loc.T("Floor"), x0, y);
+            Label(p, Loc.T("Wallpaper"), x0, FirstOf(areas, "wall").R.Y - 8);
+            Label(p, Loc.T("Things"), x0, FirstOf(areas, "thing").R.Y - 8);
+            string hoverName = null;
+            p.G.InterpolationMode = InterpolationMode.NearestNeighbor;
+            foreach (Area a in areas)
+            {
+                bool over = hover == a.Kind + ":" + a.Index;
+                if (over && a.Name.Length > 0) hoverName = a.Name;
+                switch (a.Kind)
+                {
+                    case "floor":
+                        PixelUi.Cell(p, a.R, OfficeStyles.Floors[a.Index] == owner.Office.Floor, over);
+                        p.G.DrawImageUnscaled(floors[a.Index], a.R.X + 2, a.R.Y + 2);
+                        break;
+                    case "wall":
+                        PixelUi.Cell(p, a.R, OfficeStyles.Wallpapers[a.Index] == owner.Office.Wallpaper, over);
+                        p.G.DrawImageUnscaled(walls[a.Index], a.R.X + 2, a.R.Y + 2);
+                        break;
+                    case "thing":
+                        PixelUi.Cell(p, a.R, owner.Placing == Decorating.Catalog[a.Index], over);
+                        p.G.DrawImageUnscaled(things[a.Index], a.R.X + 2, a.R.Y + 2);
+                        break;
+                    case "remove": PixelUi.Button(p, a.R, Loc.T("Remove"), PixelStyle.Secondary, over, owner.CanRemoveSelected, false); break;
+                    case "reset": PixelUi.Button(p, a.R, Loc.T("Reset the office"), PixelStyle.Secondary, over, true, false); break;
+                    case "done": PixelUi.Button(p, a.R, Loc.T("Done"), PixelStyle.Primary, over, true, false); break;
+                }
+            }
+
+            string name = owner.SelectionName();
+            string line1 = hoverName ?? (name.Length > 0 ? Loc.T("Selected: {0}", name) : Loc.T("Nothing is selected."));
+            PixelUi.Text(p, PixelUi.Fit(line1, Inner / 4), x0, selectedY, hoverName != null ? PixelUi.Gold : PixelUi.Ink);
+            int my = messageY;
+            List<string> lines = PixelUi.Wrap(message, Inner / 4);
+            for (int i = 0; i < lines.Count && i < 2; i++) { PixelUi.Text(p, lines[i], x0, my, PixelUi.Bad); my += 7; }
+        }
+
+        static Area FirstOf(List<Area> areas, string kind)
+        {
+            foreach (Area a in areas) if (a.Kind == kind) return a;
+            return areas[0];
+        }
+
+        public void Dispose()
+        {
+            foreach (Bitmap bmp in floors) bmp.Dispose();
+            foreach (Bitmap bmp in walls) bmp.Dispose();
+            foreach (Bitmap bmp in things) bmp.Dispose();
+            floors.Clear(); walls.Clear(); things.Clear();
         }
     }
 }

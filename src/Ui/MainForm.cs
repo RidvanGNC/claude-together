@@ -21,7 +21,7 @@ namespace ClaudeTogether
             BackColor = Theme.Bg;
             ForeColor = Theme.Text;
             Font = Theme.F(10f, false);
-            ClientSize = new Size(Theme.S(1040), Theme.S(760));
+            ClientSize = StartSize();
             MinimumSize = new Size(Theme.S(820), Theme.S(600));
             StartPosition = FormStartPosition.CenterScreen;
             DoubleBuffered = true;
@@ -31,6 +31,51 @@ namespace ClaudeTogether
             host.BackColor = Theme.Bg;
             Controls.Add(host);
             notice = Core.RecoverStation();
+        }
+
+        bool grown;                // the window was made bigger for a page that needs room (the wizard, a sign-in)
+
+        static Size PageSize() { return new Size(Theme.S(1040), Theme.S(760)); }
+
+        /// <summary>
+        /// The size the window opens with. For the floor: exactly the picture at a whole-number scale (the largest that fits the screen
+        /// comfortably), so that no wall is left over round it. Other pages need the usual size.
+        /// </summary>
+        static Size StartSize()
+        {
+            try
+            {
+                Config c = Core.Load();
+                if (c.Stage >= 5 && c.Accounts.Count > 0 && c.Accounts.Count <= FloorPlan.MaxDesks)
+                {
+                    Rectangle wa = Screen.PrimaryScreen.WorkingArea;
+                    int best = 2;
+                    for (int s = 2; s <= 6; s++)
+                        if (FloorArt.W * s <= wa.Width * 0.85 && FloorArt.H * s + Theme.S(60) <= wa.Height * 0.85) best = s;
+                    return new Size(FloorArt.W * best, FloorArt.H * best);
+                }
+            }
+            catch (Exception) { }
+            return PageSize();
+        }
+
+        /// <summary>Grows the window for a page that does not fit the floor's size, and puts it back for the home page.</summary>
+        void FitFor(bool home)
+        {
+            Size need = PageSize();
+            if (!home)
+            {
+                if (ClientSize.Width < need.Width || ClientSize.Height < need.Height)
+                {
+                    grown = true;
+                    ClientSize = new Size(Math.Max(ClientSize.Width, need.Width), Math.Max(ClientSize.Height, need.Height));
+                }
+            }
+            else if ((grown || ClientSize == need) && WindowState == FormWindowState.Normal)
+            {
+                grown = false;
+                ClientSize = StartSize();
+            }
         }
 
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); UiWin.DarkTitle(Handle); }
@@ -73,6 +118,7 @@ namespace ClaudeTogether
         {
             Config c = Core.Load();
             if (c.Accounts.Count == 0) { ShowWizard(); return; }
+            FitFor(true);
             Swap(new HomePage(this, c));
         }
 
@@ -81,11 +127,13 @@ namespace ClaudeTogether
             Config c = Core.Load();
             if (!c.Exists || c.Accounts.Count == 0) c.Stage = 0;
             else if (c.Stage >= 5) c.Stage = 1;
+            FitFor(false);
             Swap(new WizardPage(this, c));
         }
 
         public void ShowStation(Account a, Action<bool> done)
         {
+            FitFor(false);
             Swap(new StationPage(this, a, done));
         }
 

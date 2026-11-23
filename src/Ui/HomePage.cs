@@ -24,7 +24,9 @@ namespace ClaudeTogether
         Spinner busy;
         FloorView floor;
         RoundBtn btnView, btnDecor;
-        bool classic, hinted;
+        bool classic;
+        string hintShown = "";                 // the text of the 'window too small' hint while it is on screen
+        WinTimer hintTimer;
         UpdateFlow updates;
         WinTimer poll;
         bool polling;
@@ -183,18 +185,49 @@ namespace ClaudeTogether
             btnView.Visible = fits && !floor.Editing;
             btnView.Text = useFloor ? Loc.T("Classic view") : Loc.T("Floor view");
             btnDecor.Visible = useFloor && !floor.Editing;
-            if (!fits && !classic && !hinted && w > 0 && h > 0)
-            {
-                hinted = true;
-                SetStatus(cfg.Accounts.Count > FloorPlan.MaxDesks
-                    ? Loc.T("The floor has {0} desks. More accounts are shown in the classic view.", FloorPlan.MaxDesks)
-                    : Loc.T("The window is too small for the floor view, so the classic view is shown."));
-            }
+            HintFor(fits, w, h);
             if (floor.Visible != useFloor) floor.Visible = useFloor;
             if (flow.Visible == useFloor) flow.Visible = !useFloor;
             top.Visible = !useFloor;
             bottom.Visible = !useFloor;
             UpdateHud();
+        }
+
+        /// <summary>
+        /// Says why the classic view is shown, but only when it still is a moment later (the window is laid out in several steps when it opens),
+        /// and takes the hint down again as soon as the floor fits.
+        /// </summary>
+        void HintFor(bool fits, int w, int h)
+        {
+            if (fits || classic || w <= 0 || h <= 0)
+            {
+                if (hintTimer != null) hintTimer.Stop();
+                if (hintShown.Length > 0)
+                {
+                    if (lblStatus.Text == hintShown) SetStatus("");
+                    hintShown = "";
+                }
+                return;
+            }
+            if (hintShown.Length > 0) return;
+            if (hintTimer == null)
+            {
+                hintTimer = new WinTimer();
+                hintTimer.Interval = 800;
+                hintTimer.Tick += delegate
+                {
+                    hintTimer.Stop();
+                    int cw = ClientSize.Width, ch = ClientSize.Height;
+                    bool nowFits = FloorView.FitScale(new Size(cw, ch)) >= 2 && cfg.Accounts.Count <= FloorPlan.MaxDesks;
+                    if (nowFits || classic || cw <= 0 || ch <= 0) return;
+                    hintShown = cfg.Accounts.Count > FloorPlan.MaxDesks
+                        ? Loc.T("The floor has {0} desks. More accounts are shown in the classic view.", FloorPlan.MaxDesks)
+                        : Loc.T("The window is too small for the floor view, so the classic view is shown.");
+                    SetStatus(hintShown);
+                };
+            }
+            hintTimer.Stop();
+            hintTimer.Start();
         }
 
         /// <summary>Passes the texts and buttons of the home screen to the header of the floor.</summary>
@@ -213,7 +246,7 @@ namespace ClaudeTogether
             floor.SetHud(m);
         }
 
-        protected override void Dispose(bool disposing) { if (disposing && updates != null) updates.Stop(); if (disposing && poll != null) { poll.Stop(); poll.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing && updates != null) updates.Stop(); if (disposing && hintTimer != null) { hintTimer.Stop(); hintTimer.Dispose(); } if (disposing && poll != null) { poll.Stop(); poll.Dispose(); } base.Dispose(disposing); }
 
         void SetStatus(string s) { lblStatus.Text = s; UpdateHud(); }
 
@@ -403,39 +436,53 @@ namespace ClaudeTogether
             });
         }
 
-        void ShowSettings(bool underButton)
+        /// <summary>The lines of the settings menu, defined once: the floor shows them as a pixel menu, the classic view as a normal one.</summary>
+        List<MenuEntry> SettingsEntries()
         {
-            ContextMenuStrip m = Menus.New();
-            m.Items.Add(Menus.Item(Loc.T("Run the setup wizard again"), delegate
+            List<MenuEntry> list = new List<MenuEntry>();
+            list.Add(MenuEntry.Item(Loc.T("Run the setup wizard again"), delegate
             {
                 if (!Dlg.Ask(main, Loc.T("Open the wizard again?"), Loc.T("The back up, distribute and sign-in steps are offered again. Accounts and existing data are not deleted."), Loc.T("Open"), Loc.T("Cancel"))) return;
                 cfg.Stage = 1;
                 Core.Save(cfg);
                 main.ShowWizard();
             }));
-            m.Items.Add(Menus.Item(Loc.T("Close stuck Claude processes"), delegate
+            list.Add(MenuEntry.Item(Loc.T("Close stuck Claude processes"), delegate
             {
                 Work(Loc.T("Closing Claude processes..."), delegate { Core.StopAll(); return Loc.T("All Claude Desktop processes were closed."); });
             }));
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Menus.Item(Loc.T("Check for updates"), delegate { updates.CheckNow(); }));
-            ToolStripMenuItem auto = Menus.Item(Loc.T("Look for updates when the app starts"), delegate
+            list.Add(MenuEntry.Line());
+            list.Add(MenuEntry.Item(Loc.T("Check for updates"), delegate { updates.CheckNow(); }));
+            list.Add(MenuEntry.Toggle(Loc.T("Look for updates when the app starts"), Updates.LoadSettings().CheckOnStart, delegate
             {
                 UpdateSettings st = Updates.LoadSettings();
                 st.CheckOnStart = !st.CheckOnStart;
                 Updates.SaveSettings(st);
-            });
-            auto.Checked = Updates.LoadSettings().CheckOnStart;
-            m.Items.Add(auto);
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(Menus.Item(Loc.T("Show backup and profile folder"), delegate { Core.OpenFolder(Paths.Home); }));
-            m.Items.Add(Menus.Item(Loc.T("Open the log file"), delegate
+            }));
+            list.Add(MenuEntry.Line());
+            list.Add(MenuEntry.Item(Loc.T("Show backup and profile folder"), delegate { Core.OpenFolder(Paths.Home); }));
+            list.Add(MenuEntry.Item(Loc.T("Open the log file"), delegate
             {
                 if (File.Exists(Paths.LogFile)) Process.Start(Paths.LogFile);
                 else Dlg.Info(main, Loc.T("No log yet"), Loc.T("Nothing has been logged yet."));
             }));
-            if (underButton) m.Show(btnMenu, new Point(btnMenu.Width - Theme.S(280), btnMenu.Height + Theme.S(6)));
-            else m.Show(Cursor.Position);
+            return list;
+        }
+
+        void ShowSettings(bool underButton)
+        {
+            List<MenuEntry> entries = SettingsEntries();
+            if (!underButton) { floor.ShowMenu(entries); return; }
+            ContextMenuStrip m = Menus.New();
+            foreach (MenuEntry e in entries)
+            {
+                if (e.Separator) { m.Items.Add(new ToolStripSeparator()); continue; }
+                MenuEntry entry = e;
+                ToolStripMenuItem item = Menus.Item(e.Text, delegate { entry.Run(); });
+                if (e.Checkable) item.Checked = e.Checked;
+                m.Items.Add(item);
+            }
+            m.Show(btnMenu, new Point(btnMenu.Width - Theme.S(280), btnMenu.Height + Theme.S(6)));
         }
     }
 }

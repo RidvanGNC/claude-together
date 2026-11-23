@@ -100,11 +100,15 @@ namespace ClaudeTogether
         public static void Draw(Px p, string text, int x, int y, int rgb) { DrawScaled(p, text, x, y, rgb, 1); }
 
         /// <summary>Draws the text with every pixel enlarged to scale x scale (for signs).</summary>
-        public static void DrawScaled(Px p, string text, int x, int y, int rgb, int scale)
+        public static void DrawScaled(Px p, string text, int x, int y, int rgb, int scale) { DrawScaled(p, text, x, y, rgb, scale, false); }
+
+        /// <summary>The same; with <paramref name="turkishDots"/> the dotted i of a Turkish text keeps its dot (names of accounts are not texts).</summary>
+        public static void DrawScaled(Px p, string text, int x, int y, int rgb, int scale, bool turkishDots)
         {
             foreach (char raw in text)
             {
-                char up = raw == 'ı' ? 'I' : char.ToUpperInvariant(raw);       // the dotless i of Turkish is a plain I in capitals
+                // Turkish: the dotless i is a plain I in capitals, and the dotted i keeps its dot (İ)
+                char up = raw == 'ı' ? 'I' : (turkishDots && raw == 'i' && Loc.Lang == "tr" ? 'İ' : char.ToUpperInvariant(raw));
                 char baseChar = up;
                 switch (up)
                 {

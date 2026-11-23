@@ -27,9 +27,11 @@ namespace ClaudeTogether
     /// </summary>
     static class FloorHud
     {
-        const int ButtonY = 8, ButtonH = 12;
+        const int ButtonY = 8;
 
-        static string Clean(string text) { return System.Text.RegularExpressions.Regex.Replace(text ?? "", "\\s+", " ").Trim(); }
+        static readonly char[] Blanks = { ' ', (char)9, (char)10, (char)13 };
+
+        static string Clean(string text) { return string.Join(" ", (text ?? "").Split(Blanks, StringSplitOptions.RemoveEmptyEntries)); }
 
         /// <summary>The buttons from the right edge of the office to the left; none while the player is decorating.</summary>
         public static List<HudButton> Buttons(HudModel m, bool editing)
@@ -44,9 +46,9 @@ namespace ClaudeTogether
             if (m.ShowDecorate) { HudButton d = new HudButton(); d.Id = "decorate"; d.Text = Clean(m.DecorateText); order.Add(d); }
             foreach (HudButton b in order)
             {
-                int w = b.Menu ? 14 : PixelFont.Width(b.Text) + (b.Play ? 14 : 9);
+                int w = b.Menu ? PixelUi.MenuButtonWidth : PixelUi.ButtonWidth(b.Text, b.Play);
                 right -= w;
-                b.Rect = new Rectangle(right, ButtonY, w, ButtonH);
+                b.Rect = new Rectangle(right, ButtonY, w, PixelUi.ButtonH);
                 right -= 4;
                 list.Add(b);
             }
@@ -59,7 +61,7 @@ namespace ClaudeTogether
             return null;
         }
 
-        /// <summary>The logo: a rounded orange square with two rings.</summary>
+        /// <summary>The logo: a rounded orange square with two rings, centred in the square (measured from the middle of each pixel).</summary>
         static void Logo(Px p, int x, int y)
         {
             for (int j = 0; j < 16; j++)
@@ -70,47 +72,19 @@ namespace ClaudeTogether
                     bool edge = i == 0 || j == 0 || i == 15 || j == 15;
                     p.P(x + i, y + j, edge ? 0x7A3A26 : (j < 4 ? 0xF0956E : (j > 11 ? 0xB05A3E : 0xD97757)));
                 }
-            foreach (int cx in new[] { 6, 10 })
-                for (int j = 0; j < 16; j++)
-                    for (int i = 0; i < 16; i++)
+            foreach (double cx in new[] { 5.6, 10.4 })                  // two rings, mirrored about the middle (8) of the square
+                for (int j = 2; j < 14; j++)
+                    for (int i = 2; i < 14; i++)
                     {
-                        double d = Math.Sqrt((i - cx) * (i - cx) + (j - 7.5) * (j - 7.5));
-                        if (Math.Abs(d - 3.8) < 0.62 && i > 1 && i < 14 && j > 1 && j < 14) p.P(x + i, y + j, 0xFFFFFF);
+                        double dx = i + 0.5 - cx, dy = j + 0.5 - 8.0;
+                        if (Math.Abs(Math.Sqrt(dx * dx + dy * dy) - 3.7) < 0.62) p.P(x + i, y + j, 0xFFFFFF);
                     }
         }
 
         static void Shadowed(Px p, string text, int x, int y, int rgb, int scale)
         {
-            PixelFont.DrawScaled(p, text, x + 1, y + 1, 0x241A15, scale);
+            PixelFont.DrawScaled(p, text, x + 1, y + 1, 0x241A15, scale, false);
             PixelFont.DrawScaled(p, text, x, y, rgb, scale);
-        }
-
-        static void Button(Px p, HudButton b, bool hover)
-        {
-            Rectangle r = b.Rect;
-            int face = b.Primary ? (hover ? 0xE8895F : 0xD97757) : (hover ? 0x5A4D44 : 0x3F342D);
-            int light = b.Primary ? 0xF4A57F : 0x6E5E52;
-            int dark = b.Primary ? 0x9A4A30 : 0x2A201B;
-            int edge = b.Primary ? 0x6A301E : 0x1D1511;
-            p.R(r.X + 1, r.Y, r.Width - 2, r.Height, edge);                    // outline with cut corners
-            p.R(r.X, r.Y + 1, r.Width, r.Height - 2, edge);
-            p.R(r.X + 1, r.Y + 1, r.Width - 2, r.Height - 2, face);
-            p.R(r.X + 1, r.Y + 1, r.Width - 2, 1, light);                      // lit top
-            p.R(r.X + 1, r.Y + r.Height - 2, r.Width - 2, 1, dark);            // shaded bottom
-            int ink = b.Primary ? 0xFFFFFF : 0xF1E3C6;
-            int ty = r.Y + 3;
-            if (b.Menu)
-            {
-                for (int i = 0; i < 3; i++) p.R(r.X + 4, r.Y + 3 + i * 3, 6, 1, ink);
-                return;
-            }
-            int tx = r.X + 4;
-            if (b.Play)
-            {
-                for (int i = 0; i < 5; i++) p.R(tx, ty + i, 3 - Math.Abs(i - 2), 1, ink);       // a small play triangle
-                tx += 6;
-            }
-            PixelFont.Draw(p, b.Text, tx, ty, ink);
         }
 
         public static void Draw(Px p, HudModel m, List<HudButton> buttons, string hover, long ms)
@@ -123,7 +97,7 @@ namespace ClaudeTogether
             string sub = Clean(m.Sub), status = Clean(m.Status);
             int x = 32;
             if (sub.Length > room) sub = sub.Substring(0, Math.Max(0, room - 1)) + "…";
-            PixelFont.Draw(p, sub, x, 19, 0xC9B79A);
+            PixelUi.Text(p, sub, x, 19, 0xC9B79A);
             x += PixelFont.Width(sub) + 8;
             if (status.Length == 0 && !m.Busy) return;
             if (m.Busy)
@@ -139,13 +113,18 @@ namespace ClaudeTogether
             }
             int left = (right - 8 - x) / 4;
             if (status.Length > left) status = left > 1 ? status.Substring(0, left - 1) + "…" : "";
-            PixelFont.Draw(p, status, x, 19, 0xE0C060);
+            PixelUi.Text(p, status, x, 19, 0xE0C060);
         }
 
         /// <summary>Draws the buttons (not while decorating).</summary>
         public static void DrawButtons(Px p, List<HudButton> buttons, string hover)
         {
-            foreach (HudButton b in buttons) Button(p, b, b.Id == hover);
+            foreach (HudButton b in buttons)
+            {
+                bool over = b.Id == hover;
+                if (b.Menu) PixelUi.MenuButton(p, b.Rect, over);
+                else PixelUi.Button(p, b.Rect, b.Text, b.Primary ? PixelStyle.Primary : PixelStyle.Secondary, over, true, b.Play);
+            }
         }
     }
 }

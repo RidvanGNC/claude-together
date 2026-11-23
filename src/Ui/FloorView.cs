@@ -334,12 +334,14 @@ namespace ClaudeTogether
                         foreach (Npc n in FloorNpc.InOrder(crowd.Npcs)) if (!crowd.IsHidden(n)) FloorNpc.Draw(p, n, clockMs, n == crowd.Shooter ? stroke : null);
                     }
                 if (editing) DrawEditing(p);
+                g.DrawImageUnscaled(lights.Base, 0, 0);                       // the light is over the office; the interface is over the light
+                DrawFaded(g, lights.ToiletOff, lights.Toilet, 1.0 - toiletFade);
+                DrawFaded(g, lights.ToiletOn, lights.Toilet, toiletFade);
                 List<HudButton> buttons = HudButtons();
                 FloorHud.Draw(p, hud, buttons, hudHover, clockMs);
                 FloorHud.DrawButtons(p, buttons, hudHover);
-                g.DrawImageUnscaled(lights.Base, 0, 0);
-                DrawFaded(g, lights.ToiletOff, lights.Toilet, 1.0 - toiletFade);
-                DrawFaded(g, lights.ToiletOn, lights.Toilet, toiletFade);
+                if (editing && panel != null) panel.Draw(p);
+                if (menu != null) DrawMenu(p);
             }
             if (composite != null) composite.Dispose();
             composite = bmp;
@@ -466,25 +468,6 @@ namespace ClaudeTogether
             }
         }
 
-        protected override void OnResize(EventArgs e)
-        {
-            base.OnResize(e);
-            PlacePanel();
-        }
-
-        /// <summary>The decorating panel covers the rooms on the right of the picture (they cannot be changed yet).</summary>
-        void PlacePanel()
-        {
-            if (panel == null) return;
-            int s = Scale();
-            Point o = Origin();
-            int left = o.X + (FloorArt.Ox + 18 * 16 + 8) * s;
-            int right = o.X + (FloorArt.Ox + 30 * 16) * s;
-            int top = o.Y + (FloorArt.Oy - 2) * s;
-            int bottom = Math.Min(Height - 4, o.Y + (FloorArt.Y(FloorPlan.Rows) + 2) * s + Theme.S(28));   // a little below the building, so the panel has room for everything
-            panel.SetBounds(left, top, right - left, bottom - top);
-        }
-
         // ---------- looking and clicking ----------
 
         /// <summary>Logical picture position of a mouse position.</summary>
@@ -534,7 +517,21 @@ namespace ClaudeTogether
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
-            if (editing) { mouseLogical = null; MoveEditing(e.Location); return; }
+            if (menu != null) { MoveMenu(Logical(e.Location)); return; }
+            if (editing)
+            {
+                mouseLogical = null;
+                Point at = Logical(e.Location);
+                if (panel != null && panel.Contains(at))
+                {
+                    Cursor = panel.Clickable(at) ? Cursors.Hand : Cursors.Default;
+                    if (panel.Move(at)) { Compose(); Invalidate(); }
+                    return;
+                }
+                if (panel != null && panel.Move(new Point(-1, -1))) { Compose(); Invalidate(); }
+                MoveEditing(e.Location);
+                return;
+            }
             mouseLogical = Logical(e.Location);
             string hb = FloorHud.ButtonAt(HudButtons(), mouseLogical.Value);
             if (hb != hudHover) { hudHover = hb; Cursor = hb != null ? Cursors.Hand : Cursors.Default; Compose(); Invalidate(); }
@@ -577,7 +574,8 @@ namespace ClaudeTogether
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (editing) { if (e.Button == MouseButtons.Left) FinishDrag(); return; }
+            if (menu != null) { ClickMenu(Logical(e.Location)); return; }
+            if (editing) { if (e.Button == MouseButtons.Left && panel != null && panel.Contains(Logical(e.Location))) return; if (e.Button == MouseButtons.Left) FinishDrag(); return; }
             if (e.Button == MouseButtons.Left && hudHover != null && FloorHud.ButtonAt(HudButtons(), Logical(e.Location)) == hudHover)
             {
                 if (HudAction != null) HudAction(hudHover);
@@ -607,6 +605,95 @@ namespace ClaudeTogether
             else if (e.Button == MouseButtons.Left && AddRequested != null) AddRequested(h);
         }
 
+        // ---------- the menu ----------
+
+        List<MenuEntry> menu;
+        Rectangle menuBox;
+        int menuHover = -1;
+        const int MenuRow = 12, MenuLine = 5;
+
+        /// <summary>Shows a pixel menu under the menu button of the header.</summary>
+        public void ShowMenu(List<MenuEntry> entries)
+        {
+            menu = entries;
+            menuHover = -1;
+            int w = 0;
+            foreach (MenuEntry m in entries) if (!m.Separator) w = Math.Max(w, PixelFont.Width(m.Text));
+            w += 8 + 9 + 8;                                              // room for the check box and the margins
+            int h = 8;
+            foreach (MenuEntry m in entries) h += m.Separator ? MenuLine : MenuRow;
+            int right = FloorArt.Ox + FloorPlan.Cols * 16 - 2;
+            menuBox = new Rectangle(right - w, 8 + PixelUi.ButtonH + 2, w, h);
+            Cursor = Cursors.Default;
+            Compose();
+            Invalidate();
+        }
+
+        void CloseMenu()
+        {
+            menu = null;
+            menuHover = -1;
+            Compose();
+            Invalidate();
+        }
+
+        int MenuIndexAt(Point at)
+        {
+            if (!menuBox.Contains(at)) return -1;
+            int y = menuBox.Y + 4;
+            for (int i = 0; i < menu.Count; i++)
+            {
+                int h = menu[i].Separator ? MenuLine : MenuRow;
+                if (at.Y >= y && at.Y < y + h) return menu[i].Separator ? -1 : i;
+                y += h;
+            }
+            return -1;
+        }
+
+        void MoveMenu(Point at)
+        {
+            int i = MenuIndexAt(at);
+            Cursor = i >= 0 ? Cursors.Hand : Cursors.Default;
+            if (i == menuHover) return;
+            menuHover = i;
+            Compose();
+            Invalidate();
+        }
+
+        void ClickMenu(Point at)
+        {
+            int i = MenuIndexAt(at);
+            MenuEntry chosen = i >= 0 ? menu[i] : null;
+            CloseMenu();
+            if (chosen != null && chosen.Run != null) chosen.Run();
+        }
+
+        void DrawMenu(Px p)
+        {
+            PixelUi.Panel(p, menuBox);
+            int y = menuBox.Y + 4;
+            for (int i = 0; i < menu.Count; i++)
+            {
+                MenuEntry m = menu[i];
+                if (m.Separator)
+                {
+                    p.R(menuBox.X + 6, y + MenuLine / 2, menuBox.Width - 12, 1, 0x4A3B33);
+                    y += MenuLine;
+                    continue;
+                }
+                if (i == menuHover) p.R(menuBox.X + 4, y, menuBox.Width - 8, MenuRow, 0x4A3B33);
+                int ty = y + (MenuRow - PixelUi.TextH) / 2;
+                if (m.Checkable)
+                {
+                    p.R(menuBox.X + 7, ty, 5, 5, 0x171210);
+                    p.R(menuBox.X + 7, ty, 5, 1, 0x6E5E52); p.R(menuBox.X + 7, ty, 1, 5, 0x6E5E52); p.R(menuBox.X + 11, ty, 1, 5, 0x6E5E52); p.R(menuBox.X + 7, ty + 4, 5, 1, 0x6E5E52);
+                    if (m.Checked) { p.R(menuBox.X + 8, ty + 2, 1, 2, PixelUi.Gold); p.R(menuBox.X + 9, ty + 3, 1, 1, PixelUi.Gold); p.R(menuBox.X + 10, ty + 1, 1, 2, PixelUi.Gold); }
+                }
+                PixelUi.Text(p, m.Text, menuBox.X + 8 + 9, ty, i == menuHover ? 0xFFFFFF : PixelUi.Ink);
+                y += MenuRow;
+            }
+        }
+
         // ---------- decorating ----------
 
         public void BeginEdit()
@@ -617,9 +704,6 @@ namespace ClaudeTogether
             Cursor = Cursors.Default;
             selDesk = selItem = -1;
             panel = new FloorPanel(this);
-            Controls.Add(panel);
-            PlacePanel();
-            panel.BringToFront();
             Compose();
             Invalidate();
             Focus();
@@ -632,7 +716,6 @@ namespace ClaudeTogether
             placing = null;
             editing = false;
             selDesk = selItem = -1;
-            Controls.Remove(panel);
             panel.Dispose();
             panel = null;
             Cursor = Cursors.Default;
@@ -712,6 +795,13 @@ namespace ClaudeTogether
         }
 
         /// <summary>Back to the starting arrangement. Accounts stay at a desk.</summary>
+        /// <summary>Asks, then puts the office back to the start.</summary>
+        public void AskReset()
+        {
+            if (Dlg.Ask(FindForm(), Loc.T("Reset the office?"), Loc.T("Desks, decorations, floor and wallpaper go back to the start. Accounts keep a desk."), Loc.T("Reset"), Loc.T("Cancel")))
+                ResetOffice();
+        }
+
         public void ResetOffice()
         {
             CancelDrag();
@@ -766,8 +856,16 @@ namespace ClaudeTogether
         {
             base.OnMouseDown(e);
             Focus();
+            if (menu != null) return;
             if (!editing) return;
             Point l = Logical(e.Location);
+            if (panel != null && panel.Contains(l))
+            {
+                if (e.Button == MouseButtons.Left) panel.Click(l);
+                Compose();
+                Invalidate();
+                return;
+            }
             int tx = Tile(l.X, FloorArt.Ox), ty = Tile(l.Y, FloorArt.Oy);
             if (e.Button == MouseButtons.Right)
             {
@@ -841,6 +939,7 @@ namespace ClaudeTogether
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+            if (menu != null) { if (e.KeyCode == Keys.Escape) CloseMenu(); return; }
             if (!editing) return;
             if (e.KeyCode == Keys.R) TurnSelected();
             else if (e.KeyCode == Keys.Delete) RemoveSelected();
