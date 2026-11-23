@@ -25,6 +25,7 @@ namespace ClaudeTogether
         FloorView floor;
         RoundBtn btnView, btnDecor;
         bool classic, hinted;
+        UpdateFlow updates;
         WinTimer poll;
         bool polling;
         int working;
@@ -150,6 +151,15 @@ namespace ClaudeTogether
             poll.Tick += delegate { Poll(); };
             poll.Start();
             Poll();
+
+            updates = new UpdateFlow(main, SetStatus, SetBusy);
+            if (Updates.JustUpdatedFrom != null)        // started by an update: say that it worked
+            {
+                string from = Updates.JustUpdatedFrom, now = Updates.RunningVersion.ToString(3);
+                SetStatus(from.Length > 0 && from != now ? Loc.T("Updated from {0} to {1}.", from, now) : Loc.T("Updated to {0}.", now));
+                Updates.JustUpdatedFrom = null;
+            }
+            updates.CheckAtStart();
         }
 
         void PlaceTop()
@@ -203,7 +213,7 @@ namespace ClaudeTogether
             floor.SetHud(m);
         }
 
-        protected override void Dispose(bool disposing) { if (disposing && poll != null) { poll.Stop(); poll.Dispose(); } base.Dispose(disposing); }
+        protected override void Dispose(bool disposing) { if (disposing && updates != null) updates.Stop(); if (disposing && poll != null) { poll.Stop(); poll.Dispose(); } base.Dispose(disposing); }
 
         void SetStatus(string s) { lblStatus.Text = s; UpdateHud(); }
 
@@ -407,6 +417,16 @@ namespace ClaudeTogether
             {
                 Work(Loc.T("Closing Claude processes..."), delegate { Core.StopAll(); return Loc.T("All Claude Desktop processes were closed."); });
             }));
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(Menus.Item(Loc.T("Check for updates"), delegate { updates.CheckNow(); }));
+            ToolStripMenuItem auto = Menus.Item(Loc.T("Look for updates when the app starts"), delegate
+            {
+                UpdateSettings st = Updates.LoadSettings();
+                st.CheckOnStart = !st.CheckOnStart;
+                Updates.SaveSettings(st);
+            });
+            auto.Checked = Updates.LoadSettings().CheckOnStart;
+            m.Items.Add(auto);
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(Menus.Item(Loc.T("Show backup and profile folder"), delegate { Core.OpenFolder(Paths.Home); }));
             m.Items.Add(Menus.Item(Loc.T("Open the log file"), delegate

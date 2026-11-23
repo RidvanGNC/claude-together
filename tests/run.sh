@@ -10,6 +10,6 @@ printf '#!/bin/sh\nln -s "$5" "$4"\n' > "$WORK/fakebin/cmd.exe"
 chmod +x "$WORK/fakebin/cmd.exe"
 CORE="src/Localization.cs src/Core/*.cs src/World/*.cs"
 mcs -sdk:4.5 -langversion:5 -main:CoreTests -out:"$BIN/tests.exe" \
-  -r:System.Management.dll -r:System.Web.Extensions.dll -r:System.Core.dll \
-  $CORE tests/CoreTests.cs tests/FloorTests.cs
+  -r:System.Management.dll -r:System.Web.Extensions.dll -r:System.Core.dll -r:System.IO.Compression.dll -r:System.IO.Compression.FileSystem.dll \
+  $CORE tests/CoreTests.cs tests/FloorTests.cs tests/UpdateTests.cs
 HOME="$FAKE_HOME" XDG_CONFIG_HOME="$FAKE_HOME/.config" PATH="$WORK/fakebin:$PATH" mono "$BIN/tests.exe"

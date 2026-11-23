@@ -18,6 +18,8 @@ namespace ClaudeTogether
         public static readonly string Root = Path.Combine(Roaming, "claude-together");
         public static readonly string ConfigFile = Path.Combine(Root, "profiles.json");
         public static readonly string OfficeFile = Path.Combine(Root, "office.json");
+        public static readonly string SettingsFile = Path.Combine(Root, "settings.json");
+        public static readonly string UpdatesDir = Path.Combine(Root, "updates");
         public static readonly string LogFile = Path.Combine(Root, "app.log");
         public static readonly string LockFile = Path.Combine(Root, "station.lock");
         public static readonly string LegacyConfig = Path.Combine(Home, ".claude-profiles", "profiles.json");

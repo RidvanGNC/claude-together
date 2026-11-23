@@ -10,7 +10,7 @@ if not exist "%CSC%" (
   exit /b 1
 )
 if not exist bin mkdir bin
-set "REFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Web.Extensions.dll /r:System.Core.dll"
+set "REFS=/r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Management.dll /r:System.Web.Extensions.dll /r:System.Core.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll"
 "%CSC%" /nologo /codepage:65001 /target:winexe /out:bin\ClaudeTogether.exe /win32icon:assets\app.ico %REFS% /recurse:src\*.cs || exit /b 1
 "%CSC%" /nologo /codepage:65001 /target:exe /define:CLI /out:bin\claude-together.exe /win32icon:assets\app.ico %REFS% /recurse:src\*.cs || exit /b 1
 echo Built: bin\ClaudeTogether.exe, bin\claude-together.exe

@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p bin
 FILES=$(find src -name '*.cs' | sort)
-REFS="-r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Management.dll -r:System.Web.Extensions.dll -r:System.Core.dll"
+REFS="-r:System.Windows.Forms.dll -r:System.Drawing.dll -r:System.Management.dll -r:System.Web.Extensions.dll -r:System.Core.dll -r:System.IO.Compression.dll -r:System.IO.Compression.FileSystem.dll"
 mcs -sdk:4.5 -langversion:5 -target:winexe -out:bin/ClaudeTogether.exe -win32icon:assets/app.ico $REFS $FILES
 mcs -sdk:4.5 -langversion:5 -target:exe -define:CLI -out:bin/claude-together.exe -win32icon:assets/app.ico $REFS $FILES
 echo "Built: bin/ClaudeTogether.exe, bin/claude-together.exe"

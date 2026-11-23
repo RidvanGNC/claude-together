@@ -17,7 +17,7 @@
 
 > **Intended use**
 > Claude Together is for **your own Claude accounts on your own computer**. Run several of them side by side, share common settings, and split or hand off your own work between them, by hand or with an AI agent you direct.
-> It is **not** for selling, renting or sharing accounts, or for giving other people access to your accounts. It sends no data anywhere and has no remote access.
+> It is **not** for selling, renting or sharing accounts, or for giving other people access to your accounts. It has no network code except the automatic update check (see [Privacy](#privacy)), sends no data about you anywhere and has no remote access.
 
 ## Why
 
@@ -38,6 +38,7 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 - **Agent mode**: an AI agent can discover your other accounts (`scan`, `whoami`) and hand a task to one of them (`delegate`). Local only. See [Working across your accounts](#working-across-your-accounts).
 - **Safe**: every sign-in is wrapped in a recoverable step; an interrupted one is rolled back on the next start.
 - **Simple install**: one MSI, installed for your Windows user only. No admin rights, no dependencies. Turkish and English UI.
+- **Updates from inside the app**: when the window opens it looks, once, whether a newer release is published on this project's GitHub page; if there is one it shows what is new and asks. **Update now** downloads the MSI (or the portable zip, when you run the portable files), checks it against `SHA256SUMS.txt` of the same release, closes the app, installs and starts the new version. **Skip this version** and the switch in the settings menu (**Look for updates when the app starts**) are there too, and **Check for updates** in the menu asks on demand.
 
 <details open>
 <summary>Screenshot of the office floor</summary>
@@ -198,7 +199,7 @@ If you use macOS or Linux and want to help, please try it and open an issue with
 
 ## Privacy
 
-Everything stays on your computer. The code contains no network access; `delegate` only starts the local `claude` program, which talks to Anthropic the way it always does. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`).
+Everything stays on your computer. There is no network code except the automatic update check: one request to the list of releases of this project on GitHub when the window opens (you can switch it off in the settings menu, then no request is made; setting `CLAUDE_TOGETHER_NO_UPDATE_CHECK=1` does the same for scripts), and the download of a release when you choose **Update now**. The request carries the version of the program in its User-Agent, as GitHub asks, and nothing else: no account names, no folders, no identifier. Your choice and a skipped version are kept in `%APPDATA%\claude-together\settings.json`. Apart from that, `delegate` only starts the local `claude` program, which talks to Anthropic the way it always does. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`).
 
 ## Build
 

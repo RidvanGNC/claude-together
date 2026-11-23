@@ -192,6 +192,8 @@ jobs:
 
       - name: Smoke test the installed app window
         run: |
+          # the update check would need the network; the runner has nothing to ask for
+          $env:CLAUDE_TOGETHER_NO_UPDATE_CHECK = '1'
           $gui = Join-Path $env:LOCALAPPDATA 'Programs\ClaudeTogether\ClaudeTogether.exe'
           $p = Start-Process $gui -PassThru
           Start-Sleep -Seconds 6

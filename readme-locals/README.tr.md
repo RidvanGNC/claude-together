@@ -17,7 +17,7 @@
 
 > **Kullanım amacı**
 > Claude Together, **kendi bilgisayarınızdaki kendi Claude hesaplarınız** içindir. Birden fazla hesabı yan yana çalıştırabilir, ortak ayarları paylaşabilir ve kendi işinizi bu hesaplar arasında elle ya da yönlendirdiğiniz bir yapay zekâ ajanıyla bölüp devredebilirsiniz.
-> Hesap satmak, kiralamak ya da paylaşmak veya başkalarına hesaplarınızda erişim vermek için **değildir**. Hiçbir veriyi dışarıya göndermez ve uzaktan erişim özelliği yoktur.
+> Hesap satmak, kiralamak ya da paylaşmak veya başkalarına hesaplarınızda erişim vermek için **değildir**. Otomatik güncelleme denetimi hariç ağ kodu yoktur (bkz. [Gizlilik](#gizlilik)); hakkınızda hiçbir veriyi dışarıya göndermez ve uzaktan erişim özelliği yoktur.
 
 ## Neden
 
@@ -38,6 +38,7 @@ Claude Together her hesaba kendi Claude Masaüstü penceresini ve kendi girişin
 - **Ajan modu**: bir yapay zekâ ajanı diğer hesaplarınızı bulabilir (`scan`, `whoami`) ve birine görev devredebilir (`delegate`). Yalnızca yerelde. Bkz. [Hesaplar arasında çalışma](#hesaplar-arasında-çalışma).
 - **Güvenli**: her giriş geri alınabilir bir adımla sarılıdır. Yarım kalan işlem bir sonraki açılışta geri alınır.
 - **Kolay kurulum**: tek bir MSI, yalnızca Windows kullanıcınız için kurulur. Yönetici hakkı yok, bağımlılık yok. Arayüz Türkçe ve İngilizce.
+- **Uygulamanın içinden güncelleme**: pencere açılırken bu projenin GitHub sayfasında daha yeni bir sürüm yayımlanmış mı diye bir kez bakar; varsa yenilikleri gösterir ve sorar. **Şimdi güncelle** MSI'yi (taşınabilir dosyaları kullanıyorsanız taşınabilir zip'i) indirir, aynı sürümün `SHA256SUMS.txt` dosyasıyla doğrular, uygulamayı kapatır, kurar ve yeni sürümü başlatır. **Bu sürümü atla** ve ayarlar menüsündeki **Uygulama açılırken güncellemeleri ara** seçeneği de var, menüdeki **Güncellemeleri denetle** ise istendiğinde sorar.
 
 <details open>
 <summary>Ofis katının ekran görüntüsü</summary>
@@ -200,7 +201,7 @@ macOS ya da Linux kullanıyorsanız denemenize ve gördüklerinizi bir issue ola
 
 ## Gizlilik
 
-Her şey bilgisayarınızda kalır. Kodda ağ erişimi yoktur; `delegate` yalnızca yerel `claude` programını başlatır, o da Anthropic ile her zamanki gibi konuşur. Yukarıdaki klasörleri okur ve yazar, yerel bir günlük tutar: `%APPDATA%\claude-together\app.log`. Claude Masaüstü'nü başlatmak için kurulum klasörünü yerel bir PowerShell sorgusuyla (`Get-AppxPackage`) bulur.
+Her şey bilgisayarınızda kalır. Otomatik güncelleme denetimi hariç ağ kodu yoktur: pencere açılırken bu projenin GitHub'daki sürüm listesine tek bir istek (ayarlar menüsünden kapatabilirsiniz, o zaman hiç istek yapılmaz; betikler için `CLAUDE_TOGETHER_NO_UPDATE_CHECK=1` aynı işi görür) ve **Şimdi güncelle**'yi seçtiğinizde bir sürümün indirilmesi. İstek, GitHub'ın istediği gibi User-Agent içinde programın sürümünü taşır, başka hiçbir şey taşımaz: hesap adı, klasör, kimlik yok. Seçiminiz ve atlanan sürüm `%APPDATA%\claude-together\settings.json` içinde tutulur. Bunun dışında `delegate` yalnızca yerel `claude` programını başlatır, o da Anthropic ile her zamanki gibi konuşur. Yukarıdaki klasörleri okur ve yazar, yerel bir günlük tutar: `%APPDATA%\claude-together\app.log`. Claude Masaüstü'nü başlatmak için kurulum klasörünü yerel bir PowerShell sorgusuyla (`Get-AppxPackage`) bulur.
 
 ## Derleme
 

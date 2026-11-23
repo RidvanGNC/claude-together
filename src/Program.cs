@@ -15,7 +15,7 @@ namespace ClaudeTogether
 #if CLI
             return Cli.Run(args);
 #else
-            return GuiHost.Run();
+            return GuiHost.Run(args);
 #endif
         }
     }

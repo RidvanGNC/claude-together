@@ -10,13 +10,13 @@ Guide for AI assistants working with or inside this repository. Humans: see [REA
 
 This tool is for **people working with their own Claude accounts on their own computer**: several accounts side by side, with common settings, and their own work split or handed off between them, by hand or with an agent they direct.
 
-It is **not** for selling, renting or sharing accounts, or for giving other people access to an account. It sends no data anywhere and has no remote access.
+It is **not** for selling, renting or sharing accounts, or for giving other people access to an account. It has no network code except the automatic update check (see below), sends no data about the user anywhere and has no remote access.
 
 As an agent you must:
 
 - Work only with accounts that belong to the user, on the user's computer.
 - **Never** help set up account sharing, resale or access for other people.
-- **Never** add network code, telemetry or remote control to this project.
+- **Never** add network code, telemetry or remote control to this project. The one exception is the update check in `src/Core/Core.Update.cs`: a single request for the latest release of this project on GitHub (and the download of a release the user agreed to install). Do not add any other request, do not send anything about the user or the accounts, and keep the off switch working.
 - Run state-changing commands (`setup`, `login`, `open`, `close`, `skill install`, `install`, `uninstall`) only when the user asked for them in this conversation.
 - Use `delegate` when the user's task calls for handing work to another of their accounts (see below). Do not loop on usage-limit errors; report them to the user.
 
@@ -66,6 +66,14 @@ The target runs with its own sign-in: `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN
 
 `claude-together skill install` puts a short skill with these steps into the shared skills folder, so every account's agent finds it.
 
+## Updates (the only network code)
+
+`Updates` (`src/Core/Core.Update.cs`, UI in `src/Ui/UpdateUi.cs`, wiring in `HomePage` and `GuiHost.Run`): when the home window opens the program asks `https://api.github.com/repos/RidvanGNC/claude-together/releases/latest` once (User-Agent `claude-together/<version>`, nothing else sent), unless the user switched it off (settings menu, saved in `%APPDATA%\claude-together\settings.json`) or `CLAUDE_TOGETHER_NO_UPDATE_CHECK=1` is set. A higher version than `RunningVersion` (the assembly version, from `Cli.Version`) opens `UpdateForm`: notes, **Update now**, **Later**, **Skip this version**, and a switch for the check at start. The menu has **Check for updates** (always answers).
+
+Installing: `Updates.Prepare` downloads the MSI (when `Installer.MsiInstalled()` and the program runs from `Installer.InstallDir`) or the portable zip to `%APPDATA%\claude-together\updates\<version>`, checks it against `SHA256SUMS.txt` of the same release (no checksum, no install; the release page opens instead), unpacks the zip without letting an entry leave its folder, and for the zip checks that the exe is the announced version. `LaunchApplier` then starts a copy of the program from `updates\runner` with `--apply-update <msi|zip> <staged> <install folder> <pid> <old version>` and the window closes; that copy (see `GuiHost.Run`, before the one-instance mutex) waits for the old process, runs `msiexec /i ... /passive /norestart` or copies the files over the install folder, and starts the program again with `--updated <old version>`, which makes `HomePage` say "Updated from X to Y". Nothing is deleted from the install; staged files are cleaned at the next start. A failed update starts the old version again and says why.
+
+To try it without publishing a release: set `CLAUDE_TOGETHER_UPDATE_FEED` to a file (or URL) that holds a GitHub release answer (asset URLs may be `file:///` URLs) and `CLAUDE_TOGETHER_UPDATE_PRETEND_VERSION` to a lower version. `tests/UpdateTests.cs` does this with generated releases; keep it green when you change `Core.Update.cs`. Never put a token in the program, and never make the request carry anything but the version.
+
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
@@ -110,6 +118,7 @@ src/Ui/FloorArt.cs    all the floor art, drawn in code
 src/Ui/FloorView.cs   the floor control: whole-number scaling, hover, clicks, decorating mode (drag, place, remove)
 src/Ui/FloorPanel.cs  the side panel of the decorating mode
 src/World/Npcs.cs     the little workers: Presence, Spots (places to stay, found from the floor), Crowd (arrive, walk with Layout.Path, stay, leave; seeded random, tested)
+src/Core/Core.Update.cs  the update check and installing an update (the program's only network access); UI in src/Ui/UpdateUi.cs
 src/Ui/FloorHud.cs    the pixel header above the office (logo, status, buttons)
 src/World/Pool.cs     the pool game: physics and the player's shot choice
 src/Ui/FloorNpc.cs    draws a worker (4 directions, walking step, typing, sitting, washing, pool, arcade); the look comes from the account name
@@ -150,7 +159,7 @@ The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claud
 - C# 5 only: no string interpolation, no `?.`, no expression-bodied members. Declare `using WinTimer = System.Windows.Forms.Timer;` per file that uses it.
 - Every user-facing string goes through `Loc.T("English", args)` and needs a Turkish entry in `Localization.cs`. The brand "Claude Together" is not translated.
 - Keep the copyright header ("Rıdvan Gonca") at the top of every source file.
-- No network code. No telemetry.
+- No network code except the automatic update check (`Updates` in `src/Core/Core.Update.cs`). No telemetry.
 - The MSI stays per-user: no elevation, no `ALLUSERS`, no HKLM, no machine-wide folders. The workflow checks this.
 - Never delete user data. Move it aside with a suffix instead.
 - Add a core test for any change to config, linking, backup, or station recovery.

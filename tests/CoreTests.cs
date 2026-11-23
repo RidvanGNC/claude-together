@@ -209,6 +209,7 @@ static class CoreTests
         Check(Core.PresenceOf(codeDir, false, nobody) == Presence.Away && Core.PresenceOf(P(codeDir, "none"), false, everyoneAlive) == Presence.Away, "presence: nothing open means away; a missing folder is fine");
         Directory.Delete(codeDir, true);
 
+        UpdateTests.Run(Check, true);
         FloorTests.Run(Check);
 
         Console.WriteLine(failures == 0 ? "ALL PASS" : "FAILURES: " + failures);

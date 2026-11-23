@@ -106,8 +106,12 @@ namespace ClaudeTogether
     /// <summary>Starts the windowed app: one instance only, DPI aware, crash-safe.</summary>
     static class GuiHost
     {
-        public static int Run()
+        public static int Run(string[] args)
         {
+            // started from the updates folder to install an update: wait for the old program, install, start the new one; no window
+            if (Updates.WasAskedToApply(args))
+                return Updates.RunApplier(args, delegate(string text) { MessageBox.Show(text, "Claude Together", MessageBoxButtons.OK, MessageBoxIcon.Warning); });
+            Updates.ReadStartArguments(args);
             bool created;
             using (System.Threading.Mutex mutex = new System.Threading.Mutex(true, "Local\\ClaudeTogether.App", out created))
             {
