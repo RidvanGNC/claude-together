@@ -79,11 +79,13 @@ static class CoreTests
         Check(Directory.GetFiles(p1, "*.pre-share-*").Length == 0, "second run leaves no leftovers");
 
         Core.AddAccount(c, "three", log);
-        Check(Directory.Exists(Paths.ProfileDir("three")) && Core.Load().Accounts.Any(a => a.Name == "three"), "AddAccount");
+        Account three = Core.Load().Accounts.FirstOrDefault(a => a.Name == "three");
+        Check(three != null && three.IsClaude && Directory.Exists(P(Paths.ClaudeBase, "three")) && Core.HomeDir(three) == P(Paths.ClaudeBase, "three") && Core.IsLink(P(Core.HomeDir(three), "projects")), "AddAccount: the home is made in AGENT_BASE\\CLAUDE_BASE, with the shared folders linked");
+        Check(Core.HomeDir(c.Accounts[0]) == Paths.ProfileDir("one") && Core.HomeDir(Core.Load().Accounts.First(a => a.Name == "one")) == Paths.ProfileDir("one"), "an account made by an earlier version keeps its .claude-<name> folder");
         try { Core.AddAccount(c, "THREE", log); Check(false, "duplicate allowed"); }
         catch (InvalidOperationException) { Check(true, "duplicate rejected"); }
         Core.RemoveAccount(c, "three");
-        Check(Core.Load().Accounts.All(a => a.Name != "three") && Directory.Exists(Paths.ProfileDir("three")), "RemoveAccount keeps folders");
+        Check(Core.Load().Accounts.All(a => a.Name != "three") && Directory.Exists(P(Paths.ClaudeBase, "three")), "RemoveAccount keeps folders");
 
         Directory.Move(Paths.DefaultData, P(Paths.Roaming, "Claude.parked-test"));
         Directory.CreateDirectory(Paths.DefaultData);
@@ -209,6 +211,8 @@ static class CoreTests
         Check(Core.PresenceOf(codeDir, false, nobody) == Presence.Away && Core.PresenceOf(P(codeDir, "none"), false, everyoneAlive) == Presence.Away, "presence: nothing open means away; a missing folder is fine");
         Directory.Delete(codeDir, true);
 
+
+        AgentTests.Run(Check);
         UpdateTests.Run(Check, true);
         FloorTests.Run(Check);
 

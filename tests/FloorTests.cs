@@ -98,7 +98,7 @@ static class FloorTests
             foreach (Prop pr in fl.Props) if (pr.Blocks && !pr.OnWall && pr.Rect.Overlaps(z)) zonesFree = false;
             foreach (Slot sl in fl.Slots) if (new TileRect(sl.X, sl.Y, 2, 2).Overlaps(z)) zonesFree = false;
         }
-        Check(zonesFree && fl.KeepClear.Count == 4, "floor plan: nothing stands in front of the entrance and the three doors of the office");
+        Check(zonesFree && fl.KeepClear.Count == 6, "floor plan: nothing stands in front of the entrance, the elevator, the phone and the three doors of the office");
 
         HashSet<int> inOffice = fl.Reach(1, 1);
         bool gapsOpen = true;
@@ -123,7 +123,7 @@ static class FloorTests
         Check(Decorating.CanMoveDesk(def, 0, 1, 15) == Why.Outside && Decorating.CanMoveDesk(def, 0, 1, 0) == Why.Outside && Decorating.CanMoveDesk(def, 0, 17, 5) == Why.Outside, "office: not on the last row, not on the back wall, not outside");
 
         DecorKind plant = Decorating.Find(PropKind.Plant, 0), clock = Decorating.Find(PropKind.Clock, 0), rug = Decorating.Find(PropKind.Rug, 2);
-        Check(Decorating.CanAdd(def, plant, 9, 8) == Why.Ok && Decorating.CanAdd(def, plant, 9, 16) == Why.Outside && Decorating.CanAdd(def, plant, 2, 1) == Why.Doors && Decorating.CanAdd(def, plant, 3, 1) == Why.Ok, "office: a plant fits a free spot, not the last row, not in the 2 x 2 in front of the entrance");
+        Check(Decorating.CanAdd(def, plant, 9, 8) == Why.Ok && Decorating.CanAdd(def, plant, 9, 16) == Why.Outside && Decorating.CanAdd(def, plant, 2, 1) == Why.Doors && Decorating.CanAdd(def, plant, 6, 3) == Why.Ok, "office: a plant fits a free spot, not the last row, not in the 2 x 2 in front of the entrance");
         Check(Decorating.CanAdd(def, clock, 12, 0) == Why.Ok && Decorating.CanAdd(def, clock, 6, 0) == Why.Overlap && Decorating.CanAdd(def, clock, 1, 0) == Why.Overlap && Decorating.CanAdd(def, clock, 3, 1) == Why.Outside, "office: wall items go on the back wall, not over a window or the entrance");
         Check(Decorating.CanAdd(def, rug, 6, 7) == Why.Ok && Decorating.CanAdd(def, rug, 0, 1) == Why.Ok, "office: a rug may lie under desks or in front of a door");
 
@@ -157,6 +157,57 @@ static class FloorTests
         Check(OfficeState.FromJson("not json at all").ToJson() == def.ToJson() && OfficeState.FromJson("").ToJson() == def.ToJson() && OfficeState.FromJson("[1,2]").ToJson() == def.ToJson(), "office: an unreadable file gives the default office");
         OfficeState broken = OfficeState.FromJson("{\"floor\":\"lava\",\"wallpaper\":\"brick\",\"desks\":[{\"x\":1,\"y\":1,\"account\":\"work\"},{\"x\":99,\"y\":99,\"account\":\"personal\"}],\"items\":[{\"kind\":\"Plant\",\"x\":-5,\"y\":40,\"variant\":0},{\"kind\":\"Nonsense\",\"x\":1,\"y\":1},{\"kind\":\"Plant\",\"x\":9,\"y\":8,\"variant\":0}]}");
         Check(Decorating.Check(broken) == Why.Ok && broken.Floor == "wood" && broken.Wallpaper == "brick" && broken.DeskOf("work") >= 0 && broken.DeskOf("personal") >= 0, "office: a damaged file is repaired: bad style, impossible desks and decorations are fixed, accounts stay seated");
+
+
+        // ---- the elevator and the floor above ----
+        Prop lift = fl.Props.FirstOrDefault(q => q.Kind == PropKind.Elevator);
+        Check(lift != null && lift.OnWall && lift.X == 3 && lift.Y == 0 && lift.W == 2 && fl.KeepClear.Any(z => z.X == 3 && z.Y == 1 && z.W == 2 && z.H == 2), "elevator: it hangs on the back wall right next to the front door, with room to stand in front of it");
+        Check(Decorating.CanAdd(def, new DecorKind("Plant", PropKind.Plant, 0, 1, 1, true, false), 3, 1) == Why.Doors && Decorating.CanAdd(def, new DecorKind("Clock", PropKind.Clock, 0, 1, 1, false, true), 4, 0) == Why.Overlap, "elevator: nothing can be put in front of it or over it");
+        OfficeState oldSave = OfficeState.FromJson("{\"items\":[{\"kind\":\"Clock\",\"x\":4,\"y\":0,\"variant\":0},{\"kind\":\"Plant\",\"x\":3,\"y\":1,\"variant\":0},{\"kind\":\"Plant\",\"x\":9,\"y\":8,\"variant\":0}]}");
+        Check(Decorating.Check(oldSave) == Why.Ok && oldSave.Items.Count == 1 && oldSave.Items[0].X == 9, "elevator: an office saved before it existed loses only what is where the elevator is now; the rest stays");
+
+        Layout up = FloorPlan.BuildUpper();
+        Check(up.Level == 1 && fl.Level == 0, "upper floor: it is the second layout");
+        Check(up.Rooms.Sum(r => r.Area()) == FloorPlan.Cols * FloorPlan.Rows, "upper floor: rooms cover the 30 x 17 floor exactly");
+        bool upClash = false;
+        for (int a = 0; a < up.Rooms.Count; a++)
+            for (int b = a + 1; b < up.Rooms.Count; b++)
+                foreach (TileRect ra in up.Rooms[a].Parts) foreach (TileRect rb in up.Rooms[b].Parts) if (ra.Overlaps(rb)) upClash = true;
+        Check(!upClash, "upper floor: no two rooms overlap");
+        Check(up.Rooms.Select(r => r.Kind).Distinct().Count() == 6 && up.Rooms.Count(r => r.Kind == RoomKind.Meeting) == 2, "upper floor: lobby, corridor, two meeting rooms, storage, prayer room and tea house");
+        Prop lift2 = up.Props.FirstOrDefault(q => q.Kind == PropKind.Elevator);
+        Check(lift2 != null && lift2.X == lift.X && lift2.Y == lift.Y && lift2.W == lift.W && lift2.Variant != lift.Variant, "upper floor: the elevator is above the same spot, showing the other arrow");
+        bool doorsConnect = up.Doors.All(d => (up.CanStep(d.X, d.Y - 1, 0, 1) && up.CanStep(d.X, d.Y, 0, 1)) || (up.CanStep(d.X, d.Y + 1, 0, -1) && up.CanStep(d.X, d.Y, 0, -1)));
+        Check(up.Doors.Count == 6 && doorsConnect, "upper floor: six doors, each cut into a wall face and joining the corridor with a room");
+        bool upSolids = false;
+        List<TileRect> upBlocks = up.Props.Where(q => q.Blocks && !q.OnWall).Select(q => q.Rect).ToList();
+        for (int a = 0; a < upBlocks.Count; a++) for (int b = a + 1; b < upBlocks.Count; b++) if (upBlocks[a].Overlaps(upBlocks[b])) upSolids = true;
+        Check(!upSolids, "upper floor: furniture never overlaps");
+        bool upInside = true;
+        foreach (Prop pr in up.Props)
+        {
+            Room inRoom = up.RoomAt(pr.X, pr.Y);
+            if (inRoom == null || !inRoom.Contains(pr.X + pr.W - 1, pr.Y + pr.H - 1)) upInside = false;
+            if (pr.OnWall && !up.BackRows.Any(b => b.Contains(pr.X, pr.Y) && b.Contains(pr.X + pr.W - 1, pr.Y))) upInside = false;
+        }
+        Check(upInside, "upper floor: every prop sits inside one room; hung items sit on a back wall row");
+        bool upLast = true;
+        foreach (TileRect lr in up.LastRows) foreach (Prop pr in up.Props) if (pr.Blocks && !pr.OnWall && pr.Rect.Overlaps(lr)) upLast = false;
+        bool upHung = true;
+        List<TileRect> upHungRects = up.Props.Where(q => q.OnWall).Select(q => q.Rect).Concat(up.Doors.Select(d => new TileRect(d.X, d.Y, d.Len, 1))).ToList();
+        for (int a = 0; a < upHungRects.Count; a++) for (int b = a + 1; b < upHungRects.Count; b++) if (upHungRects[a].Overlaps(upHungRects[b])) upHung = false;
+        Check(upLast && upHung, "upper floor: the last row of every room stays empty and nothing hangs over a door or another hung thing");
+        HashSet<int> fromLobby = up.Reach(1, 1);
+        string upMissing = "";
+        int[][] upSpots =
+        {
+            new[] { 4, 2 }, new[] { 9, 1 }, new[] { 10, 1 }, new[] { 7, 3 }, new[] { 10, 4 }, new[] { 17, 1 }, new[] { 18, 4 }, new[] { 15, 2 },
+            new[] { 24, 4 }, new[] { 25, 2 }, new[] { 28, 2 }, new[] { 3, 7 }, new[] { 20, 8 }, new[] { 2, 11 }, new[] { 5, 14 }, new[] { 8, 12 },
+            new[] { 13, 11 }, new[] { 20, 12 }, new[] { 20, 15 }, new[] { 28, 14 }, new[] { 12, 12 }, new[] { 14, 12 }
+        };
+        foreach (int[] sp in upSpots) if (!up.Walkable(sp[0], sp[1]) || !up.ReachedTile(fromLobby, sp[0], sp[1])) upMissing += "(" + sp[0] + "," + sp[1] + ") ";
+        Check(upMissing.Length == 0, "upper floor: from the lobby a walker reaches the corridor and every room, the presenter's place, the seats, the rugs, the tea tables " + upMissing);
+        Check(up.Props.Count(q => q.Kind == PropKind.PrayerRug) == 7 && up.Props.Count(q => q.Kind == PropKind.TeaTable) == 10 && up.Props.Count(q => q.Kind == PropKind.Stool) == 20 && up.Props.Count(q => q.Kind == PropKind.MeetChair) == 16, "upper floor: seven prayer rugs, ten tea tables with twenty stools, eight chairs in each meeting room");
 
         // ---- time of day, the street, traffic, doors ----
         bool dawnRises = true, duskFalls = true;
@@ -679,5 +730,6 @@ static class FloorTests
         TileRect tbl = ViewMap.Rect(1, 22, 13, 5, 2), tbl2 = ViewMap.Rect(2, 22, 13, 5, 2), tbl3 = ViewMap.Rect(3, 22, 13, 5, 2);
         Check(tbl.W == 2 && tbl.H == 5 && tbl3.W == 2 && tbl3.H == 5 && tbl2.W == 5 && tbl2.H == 2 && ViewMap.ViewCols(1) == 17 && ViewMap.ViewRows(1) == 30 && ViewMap.ViewCols(2) == 30, "turn: a table of 5 x 2 tiles stands as 2 x 5 after a quarter turn; the building 30 x 17 stands as 17 x 30");
         Check(ViewMap.Face(1, Facing.Down) == Facing.Left && ViewMap.Face(2, Facing.Down) == Facing.Up && ViewMap.Face(3, Facing.Down) == Facing.Right && ViewMap.Face(4, Facing.Right) == Facing.Right && ViewMap.Face(1, Facing.Up) == Facing.Right && ViewMap.Face(-1, Facing.Down) == Facing.Right && ViewMap.Norm(-1) == 3, "turn: what faced south faces west, north and east after one, two and three quarter turns");
+        UpperTests.Run(Check);
     }
 }

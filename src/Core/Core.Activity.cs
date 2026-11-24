@@ -41,7 +41,7 @@ namespace ClaudeTogether
         }
 
         /// <summary>The folder where this account's Claude Code keeps its settings and live sessions.</summary>
-        public static string CodeDir(Account a) { return a.Primary ? Paths.SrcDir : Paths.ProfileDir(a.Name); }
+        public static string CodeDir(Account a) { return a.Primary ? Paths.SrcDir : HomeDir(a); }
 
         /// <summary>
         /// What an account is doing: busy while one of its live Claude Code sessions works, idle while it is open (Claude
@@ -78,7 +78,10 @@ namespace ClaudeTogether
             {
                 bool run;
                 running.TryGetValue(a.Name, out run);
-                r[a.Name] = PresenceOf(CodeDir(a), run, ProcessAlive);
+                Presence p = a.IsClaude ? PresenceOf(CodeDir(a), run, ProcessAlive) : Presence.Away;
+                Presence fromHooks = ChatPresence(Chats(a.Name, DateTime.UtcNow));
+                if (fromHooks == Presence.Busy || (fromHooks == Presence.Idle && p == Presence.Away)) p = fromHooks;
+                r[a.Name] = p;
             }
             return r;
         }

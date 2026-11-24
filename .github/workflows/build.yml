@@ -181,6 +181,19 @@ jobs:
             if ($res.output -notmatch [regex]::Escape($want)) { throw "delegate output lacks '$want': $($res.output)" }
           }
 
+          # a ChatGPT (Codex) account lives in AGENT_BASE\CHATGPT_BASE, shares its sessions and keeps its sign-in in its own folder
+          Invoke-Cli 0 @('add', 'gpt', '--provider', 'chatgpt') | Out-Null
+          $gptHome = Join-Path $env:USERPROFILE 'AGENT_BASE\CHATGPT_BASE\gpt'
+          if ((Get-Item (Join-Path $gptHome 'sessions')).LinkType -ne 'Junction') { throw "the ChatGPT sessions folder is not linked to the shared one" }
+          if (-not (Select-String -Path (Join-Path $gptHome 'config.toml') -Pattern 'cli_auth_credentials_store = "file"' -Quiet)) { throw "the Codex sign-in is not kept in the account folder" }
+          if (((Invoke-Cli 0 @('list', '--json')) | ConvertFrom-Json | Where-Object { $_.name -eq 'gpt' }).provider -ne 'chatgpt') { throw "list does not show the ChatGPT account" }
+          # what a chat does: an agent's hook call leaves a small local file that 'activity' reads
+          $env:CLAUDE_TOGETHER_ACCOUNT = 'gpt'
+          '{"session_id":"ci1","hook_event_name":"UserPromptSubmit","prompt":"ci check"}' | & $cli hook chatgpt
+          $env:CLAUDE_TOGETHER_ACCOUNT = $null
+          $chat = (Invoke-Cli 0 @('activity', '--json')) | ConvertFrom-Json
+          if (@($chat | Where-Object { $_.account -eq 'gpt' -and $_.state -eq 'thinking' -and $_.title -eq 'ci check' }).Count -ne 1) { throw "the hook call was not noted" }
+
           # 'install' and 'uninstall' are for the portable zip and must leave an MSI install alone
           foreach ($cmd in 'install', 'uninstall') {
             $out = & bin\claude-together.exe $cmd 2>&1 | Out-String

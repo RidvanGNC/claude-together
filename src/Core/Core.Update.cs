@@ -29,6 +29,12 @@ namespace ClaudeTogether
         public string SkippedVersion = "";
         public string Language = "auto";      // auto (the language of Windows), en or tr
         public int View;                      // how the office is turned: 0 to 3 quarter turns
+        public bool TrackActivity;            // the hooks of the agents report what each chat is doing (off until the user switches it on)
+        public bool Weather;                  // the weather at the user's place is shown in the windows (needs the internet; off until switched on)
+        public bool PrayerTimes;              // the workers pray at the prayer times of the user's place (needs the internet; off until switched on)
+        public bool HasPlace;                 // the place below was chosen
+        public string PlaceName = "";
+        public double Latitude, Longitude;    // rounded to two decimals
     }
 
     /// <summary>How an update is put in place.</summary>
@@ -207,6 +213,15 @@ namespace ClaudeTogether
                 s.Language = lang == "en" || lang == "tr" ? lang : "auto";
                 int view;
                 if (int.TryParse(Str(d, "view"), out view) && view >= 0 && view <= 3) s.View = view;
+                if (d.TryGetValue("trackActivity", out v) && v is bool) s.TrackActivity = (bool)v;
+                if (d.TryGetValue("weather", out v) && v is bool) s.Weather = (bool)v;
+                if (d.TryGetValue("prayerTimes", out v) && v is bool) s.PrayerTimes = (bool)v;
+                s.PlaceName = Str(d, "placeName");
+                double lat, lon;
+                if (s.PlaceName.Length > 0 && double.TryParse(Str(d, "latitude"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out lat)
+                    && double.TryParse(Str(d, "longitude"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out lon)
+                    && Math.Abs(lat) <= 90 && Math.Abs(lon) <= 180)
+                { s.HasPlace = true; s.Latitude = lat; s.Longitude = lon; }
             }
             catch (Exception) { }
             return s;
@@ -221,6 +236,15 @@ namespace ClaudeTogether
                 d["skippedVersion"] = s.SkippedVersion ?? "";
                 d["language"] = s.Language ?? "auto";
                 d["view"] = s.View;
+                d["trackActivity"] = s.TrackActivity;
+                d["weather"] = s.Weather;
+                d["prayerTimes"] = s.PrayerTimes;
+                if (s.HasPlace)
+                {
+                    d["placeName"] = s.PlaceName ?? "";
+                    d["latitude"] = Math.Round(s.Latitude, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                    d["longitude"] = Math.Round(s.Longitude, 2).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture);
+                }
                 Directory.CreateDirectory(Paths.Root);
                 string tmp = Paths.SettingsFile + ".tmp";
                 File.WriteAllText(tmp, new JavaScriptSerializer().Serialize(d), new UTF8Encoding(false));

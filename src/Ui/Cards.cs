@@ -67,6 +67,7 @@ namespace ClaudeTogether
             if (State == CardState.Running) Primary.Text = Loc.T("Show");
             else if (State == CardState.NeedLogin) Primary.Text = Loc.T("Sign in");
             else Primary.Text = Loc.T("Open");
+            if (!Acct.IsClaude && State != CardState.NeedLogin) Primary.Text = Loc.T("Open");
             Primary.Glyph = State == CardState.Ready ? GlyphKind.Play : GlyphKind.None;
             LayoutKids();
         }
@@ -126,7 +127,7 @@ namespace ClaudeTogether
             using (SolidBrush db = new SolidBrush(dot)) g.FillEllipse(db, tx, dy + Theme.S(6), ds, ds);
             Gfx.Txt(g, label, Theme.F(9.5f, false), new Rectangle(tx + ds + Theme.S(8), dy, tw, Theme.S(20)), State == CardState.Ready ? Theme.Muted : dot, TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
 
-            string sub = Acct.Primary ? Loc.T("Main window") : Loc.T("Separate window");
+            string sub = !Acct.IsClaude ? Loc.T("ChatGPT, runs in a terminal (Codex)") : (Acct.Primary ? Loc.T("Main window") : Loc.T("Separate window"));
             Gfx.Txt(g, sub, Theme.F(9f, false), new Rectangle(pad, pad + d + Theme.S(14), Width - 2 * pad, Theme.S(20)), Theme.Muted, TextFormatFlags.Left);
         }
     }

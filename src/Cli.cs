@@ -19,9 +19,9 @@ namespace ClaudeTogether
         const int ExitNeedsAction = 3;
 
         const string Help =
-@"claude-together " + Version + @" - run multiple Claude accounts side by side
+@"claude-together " + Version + @" - run several Claude and ChatGPT accounts side by side
 
-For your own Claude accounts on your own computer: run them side by side and split your own work between them.
+For your own accounts on your own computer: run them side by side and split your own work between them.
 Not for selling or sharing accounts. It sends no data anywhere and has no remote access.
 
 Usage: claude-together <command> [options]
@@ -31,13 +31,15 @@ Commands
   setup <primary> [<other>...] First-time setup: back up, then share common data between accounts.
                                <primary> is the account signed in to Claude Desktop right now.
   list                         Show accounts: mode, sign-in state, running state
-  add <name>                   Add an account (then: login <name>)
+  add <name> [--provider <p>]  Add an account of an agent: claude (default) or chatgpt (then: login <name>)
   remove <name>                Remove an account from the list (its data is kept)
-  login <name>                 Sign in to an account in Claude Desktop
+  login <name>                 Sign in to an account (Claude: in Claude Desktop; ChatGPT: runs 'codex login')
   open [<name>...] [--all]     Start Claude Desktop for accounts (or focus it if already running)
   close [<name>...] [--all]    Stop Claude Desktop for accounts
-  run <name> [-- <command>]    Run a command with the account's Claude Code config (default: claude)
+  run <name> [-- <command>]    Run a command with the account's home folder (default: claude or codex)
   env <name>                   Print the environment variables of an account
+  activity [--json]            Show what each chat of each account is doing (needs 'hooks install')
+  hooks install|remove|status  Let the agents report what their chats do (a local file per chat; nothing is sent anywhere)
   scan                         Find the accounts on this computer (including folders that are not registered)
   whoami                       Show which account this session runs as, and whether it may delegate
   delegate <name> [options]    Run one headless Claude Code session as another account and wait for the result
@@ -53,6 +55,7 @@ Options
   -y, --yes                    Do not ask for confirmation (closes Claude Desktop when needed)
   --json                       Machine-readable output (list, scan, whoami, delegate)
   --all                        Apply to every account (open, close)
+  --provider claude|chatgpt    The agent of a new account (add)
   --shell cmd|powershell|json  Output format of env (default: cmd)
   --lang en|tr                 Message language (default: system language or CLAUDE_TOGETHER_LANG)
 
@@ -93,7 +96,7 @@ Examples
             public bool Has(params string[] names) { return names.Any(n => Flags.Contains(n)); }
         }
 
-        static readonly HashSet<string> ValueOptions = new HashSet<string> { "--shell", "--lang", "--prompt", "--prompt-file", "--cwd", "--max-turns", "--timeout" };
+        static readonly HashSet<string> ValueOptions = new HashSet<string> { "--provider", "--shell", "--lang", "--prompt", "--prompt-file", "--cwd", "--max-turns", "--timeout" };
 
         static Args Parse(string[] argv)
         {
@@ -145,6 +148,9 @@ Examples
                     case "run": return RunCommand(a);
                     case "env": return Env(a);
                     case "scan": return ScanCommand(a);
+                    case "hook": return HookCommand(a);
+                    case "hooks": return HooksCommand(a);
+                    case "activity": return ActivityCommand(a);
                     case "whoami": return WhoAmI(a);
                     case "delegate": return DelegateCommand(a);
                     case "skill": return SkillCommand(a);
@@ -183,7 +189,7 @@ Examples
 
         static List<Account> Targets(Config cfg, Args a)
         {
-            if (a.Has("--all")) return cfg.Accounts;
+            if (a.Has("--all")) return cfg.Accounts.Where(x => x.IsClaude).ToList();     // only Claude has a window to open or close
             if (a.Positional.Count == 0) throw new UsageException("Name at least one account, or use --all.", ExitUsage);
             List<Account> list = new List<Account>();
             foreach (string n in a.Positional)
@@ -268,13 +274,14 @@ Examples
                 {
                     Dictionary<string, object> d = new Dictionary<string, object>();
                     d["name"] = x.Name;
+                    d["provider"] = x.Provider;
                     d["mode"] = x.Desktop;
                     d["signedIn"] = Core.Ready(x);
                     d["running"] = running[x.Name];
-                    d["codeSignedIn"] = Core.CodeSignedIn(Paths.ProfileDir(x.Name));
+                    d["codeSignedIn"] = Core.AgentSignedIn(x);
                     d["current"] = current != null && current.Name == x.Name;
-                    d["configDir"] = Paths.ProfileDir(x.Name);
-                    d["desktopDataDir"] = Paths.DataDir(x);
+                    d["configDir"] = Core.HomeDir(x);
+                    d["desktopDataDir"] = x.IsClaude ? Paths.DataDir(x) : null;
                     rows.Add(d);
                 }
                 Console.WriteLine(Core.ToJson(rows));
@@ -283,17 +290,20 @@ Examples
 
             if (cfg.Accounts.Count == 0) { Console.WriteLine(Loc.T("No accounts yet. Run: claude-together setup <primary> [<other>...]")); return ExitOk; }
             int w = Math.Max(4, cfg.Accounts.Max(x => x.Name.Length));
-            Console.WriteLine("{0}  {1}  {2}  {3}", "NAME".PadRight(w), "MODE".PadRight(9), "SIGN-IN".PadRight(9), "STATE");
+            Console.WriteLine("{0}  {1}  {2}  {3}  {4}", "NAME".PadRight(w), "AGENT".PadRight(7), "MODE".PadRight(9), "SIGN-IN".PadRight(9), "STATE");
             foreach (Account x in cfg.Accounts)
-                Console.WriteLine("{0}  {1}  {2}  {3}", x.Name.PadRight(w), x.Desktop.PadRight(9), (Core.Ready(x) ? "ready" : "needed").PadRight(9), running[x.Name] ? "running" : "stopped");
+                Console.WriteLine("{0}  {1}  {2}  {3}  {4}", x.Name.PadRight(w), x.Provider.PadRight(7), x.Desktop.PadRight(9), (Core.Ready(x) ? "ready" : "needed").PadRight(9), running[x.Name] ? (x.IsClaude ? "running" : "active") : "stopped");
             return ExitOk;
         }
 
         static int Add(Args a)
         {
             Config cfg = RequireConfig();
-            if (a.Positional.Count < 1) throw new UsageException("Usage: claude-together add <name>", ExitUsage);
-            Core.AddAccount(cfg, a.Positional[0], Console.WriteLine);
+            if (a.Positional.Count < 1) throw new UsageException("Usage: claude-together add <name> [--provider claude|chatgpt]", ExitUsage);
+            string chosen;
+            string provider = Providers.Parse(a.Options.TryGetValue("--provider", out chosen) ? chosen : "");
+            if (provider == null) throw new UsageException("--provider must be claude or chatgpt.", ExitUsage);
+            Core.AddAccount(cfg, a.Positional[0], provider, Console.WriteLine);
             Console.WriteLine(Loc.T("Added. Next: claude-together login {0}", a.Positional[0].Trim()));
             return ExitOk;
         }
@@ -311,6 +321,17 @@ Examples
         {
             Config cfg = RequireConfig();
             Account acct = RequireAccount(cfg, a);
+            if (!acct.IsClaude)
+            {
+                // ChatGPT (Codex) signs in on its own, in the console, with the account's home folder.
+                ProcessStartInfo psi = Core.CommandStartInfo(new List<string> { Providers.Command(acct.Provider), "login" });
+                Core.SetAgentEnv(psi, acct);
+                try
+                {
+                    using (Process p = Process.Start(psi)) { p.WaitForExit(); return p.ExitCode; }
+                }
+                catch (Exception ex) { throw new InvalidOperationException(Loc.T("Could not start {0}: {1}", Providers.Command(acct.Provider), ex.Message)); }
+            }
             EnsureClosed(a, Loc.T("Signing in needs every Claude window to be closed."));
 
             StationCtl ctl = new StationCtl();
@@ -340,6 +361,11 @@ Examples
             int code = ExitOk;
             foreach (Account acct in Targets(cfg, a))
             {
+                if (!acct.IsClaude)
+                {
+                    Console.Error.WriteLine(Loc.T("{0} has no window to open. Use: claude-together run {0}", acct.Name));
+                    continue;
+                }
                 if (!Core.Ready(acct))
                 {
                     Console.Error.WriteLine(Loc.T("{0} needs to sign in first: claude-together login {0}", acct.Name));
@@ -366,11 +392,10 @@ Examples
         {
             Config cfg = RequireConfig();
             Account acct = RequireAccount(cfg, a);
-            List<string> command = a.Rest.Count > 0 ? a.Rest : new List<string> { "claude" };
+            List<string> command = a.Rest.Count > 0 ? a.Rest : new List<string> { Providers.Command(acct.Provider) };
 
             ProcessStartInfo psi = Core.CommandStartInfo(command);
-            psi.EnvironmentVariables["CLAUDE_CONFIG_DIR"] = Paths.ProfileDir(acct.Name);
-            psi.EnvironmentVariables["CLAUDE_TOGETHER_ACCOUNT"] = acct.Name;
+            Core.SetAgentEnv(psi, acct);
             using (Process p = Process.Start(psi))
             {
                 p.WaitForExit();
@@ -384,16 +409,20 @@ Examples
             Account acct = RequireAccount(cfg, a);
             string shell;
             if (!a.Options.TryGetValue("--shell", out shell)) shell = "cmd";
-            string dir = Paths.ProfileDir(acct.Name);
+            string dir = Core.HomeDir(acct);
+            string var = Providers.HomeVar(acct.Provider);
 
-            if (shell == "cmd") Console.WriteLine("set CLAUDE_CONFIG_DIR=" + dir);
-            else if (shell == "powershell") Console.WriteLine("$env:CLAUDE_CONFIG_DIR = '" + dir.Replace("'", "''") + "'");
+            if (shell == "cmd") Console.WriteLine("set " + var + "=" + dir);
+            else if (shell == "powershell") Console.WriteLine("$env:" + var + " = '" + dir.Replace("'", "''") + "'");
             else if (shell == "json")
             {
                 Dictionary<string, object> d = new Dictionary<string, object>();
-                d["CLAUDE_CONFIG_DIR"] = dir;
-                d["desktopDataDir"] = Paths.DataDir(acct);
-                d["desktopArgs"] = acct.Primary ? "" : "--user-data-dir=\"" + Paths.DataDir(acct) + "\"";
+                d[var] = dir;
+                if (acct.IsClaude)
+                {
+                    d["desktopDataDir"] = Paths.DataDir(acct);
+                    d["desktopArgs"] = acct.Primary ? "" : "--user-data-dir=\"" + Paths.DataDir(acct) + "\"";
+                }
                 Console.WriteLine(Core.ToJson(d));
             }
             else throw new UsageException("--shell must be cmd, powershell or json.", ExitUsage);
@@ -414,6 +443,7 @@ Examples
                 {
                     Dictionary<string, object> d = new Dictionary<string, object>();
                     d["name"] = e.Name;
+                    d["provider"] = e.Provider;
                     d["registered"] = e.Registered;
                     d["primary"] = e.Primary;
                     d["codeSignedIn"] = e.CodeSignedIn;
@@ -428,9 +458,9 @@ Examples
 
             if (found.Count == 0) { Console.WriteLine(Loc.T("No accounts found.")); return ExitOk; }
             int w = Math.Max(4, found.Max(x => x.Name.Length));
-            Console.WriteLine("{0}  {1}  {2}  {3}", "NAME".PadRight(w), "LISTED".PadRight(6), "CODE".PadRight(6), "DESKTOP");
+            Console.WriteLine("{0}  {1}  {2}  {3}  {4}", "NAME".PadRight(w), "AGENT".PadRight(7), "LISTED".PadRight(6), "CODE".PadRight(6), "DESKTOP");
             foreach (ScanEntry e in found)
-                Console.WriteLine("{0}  {1}  {2}  {3}", e.Name.PadRight(w), Yes(e.Registered, "no").PadRight(6), (e.CodeSignedIn ? "ready" : "needed").PadRight(6), e.DesktopSignedIn ? "ready" : "needed");
+                Console.WriteLine("{0}  {1}  {2}  {3}  {4}", e.Name.PadRight(w), e.Provider.PadRight(7), Yes(e.Registered, "no").PadRight(6), (e.CodeSignedIn ? "ready" : "needed").PadRight(6), e.Provider != Providers.Claude ? "-" : (e.DesktopSignedIn ? "ready" : "needed"));
             if (found.Any(x => !x.Registered)) Console.WriteLine(Loc.T("Accounts that are not listed are only hints. Add one with: claude-together add <name>"));
             return ExitOk;
         }
@@ -448,7 +478,8 @@ Examples
                 Dictionary<string, object> d = new Dictionary<string, object>();
                 d["account"] = me == null ? null : me.Name;
                 d["source"] = source;
-                d["configDir"] = me == null ? null : Paths.ProfileDir(me.Name);
+                d["configDir"] = me == null ? null : Core.HomeDir(me);
+                d["provider"] = me == null ? null : me.Provider;
                 d["depth"] = depth;
                 d["canDelegate"] = canDelegate;
                 Console.WriteLine(Core.ToJson(d));
@@ -456,6 +487,93 @@ Examples
             else if (me != null) Console.WriteLine(me.Name + (canDelegate ? "" : Loc.T(" (delegated session: cannot delegate)")));
             else Console.WriteLine(Loc.T("No claude-together account detected for this session."));
             return me == null ? ExitNeedsAction : ExitOk;
+        }
+
+        /// <summary>
+        /// Called by the agents' hooks: claude-together hook claude|chatgpt. Reads the event from standard input, notes it in a local
+        /// file and prints nothing (the text a hook prints can become part of the chat). It never fails: a hook must not disturb the agent.
+        /// </summary>
+        static int HookCommand(Args a)
+        {
+            try
+            {
+                string provider = a.Positional.Count > 0 ? Providers.Parse(a.Positional[0]) : null;
+                if (provider == null) return ExitOk;
+                string json;
+                using (Stream stdin = Console.OpenStandardInput())
+                using (StreamReader reader = new StreamReader(stdin, new UTF8Encoding(false)))
+                    json = reader.ReadToEnd();
+                Core.RecordHook(provider, json);
+            }
+            catch (Exception) { }
+            return ExitOk;
+        }
+
+        static int HooksCommand(Args a)
+        {
+            Config cfg = RequireConfig();
+            string verb = a.Positional.Count > 0 ? a.Positional[0].ToLowerInvariant() : "status";
+            if (verb == "install")
+            {
+                int n = Core.InstallHooks(cfg, Console.WriteLine);
+                AppSettings st = Updates.LoadSettings(); st.TrackActivity = true; Updates.SaveSettings(st);
+                Console.WriteLine(Loc.T("Hooks installed ({0} files changed). New chats report what they do; chats that are already open need a restart.", n));
+                if (cfg.Accounts.Any(x => !x.IsClaude))
+                    Console.WriteLine(Loc.T("ChatGPT: open Codex once, run /hooks and trust the Claude Together hook."));
+                return ExitOk;
+            }
+            if (verb == "remove")
+            {
+                int n = Core.RemoveHooks(cfg, Console.WriteLine);
+                AppSettings st = Updates.LoadSettings(); st.TrackActivity = false; Updates.SaveSettings(st);
+                Console.WriteLine(Loc.T("Hooks removed ({0} files changed).", n));
+                return ExitOk;
+            }
+            if (verb != "status") throw new UsageException("Usage: claude-together hooks install|remove|status", ExitUsage);
+            bool on = Core.HooksInstalled(cfg);
+            Console.WriteLine(on ? Loc.T("Hooks are installed.") : Loc.T("Hooks are not installed."));
+            return ExitOk;
+        }
+
+        static int ActivityCommand(Args a)
+        {
+            Config cfg = Core.Load();
+            DateTime now = DateTime.UtcNow;
+            Dictionary<string, List<ChatState>> all = Core.AllChats(cfg, now);
+
+            if (a.Has("--json"))
+            {
+                List<object> rows = new List<object>();
+                foreach (Account x in cfg.Accounts)
+                    foreach (ChatState c in all[x.Name])
+                    {
+                        Dictionary<string, object> d = new Dictionary<string, object>();
+                        d["account"] = x.Name;
+                        d["provider"] = x.Provider;
+                        d["session"] = c.Session;
+                        d["title"] = c.Title;
+                        d["cwd"] = c.Cwd;
+                        d["state"] = c.State;
+                        d["tool"] = c.Tool;
+                        d["detail"] = c.Detail;
+                        d["seconds"] = (int)(now - c.Since).TotalSeconds;
+                        d["subagents"] = c.Subs.Count;
+                        rows.Add(d);
+                    }
+                Console.WriteLine(Core.ToJson(rows));
+                return ExitOk;
+            }
+
+            int count = 0;
+            foreach (Account x in cfg.Accounts)
+                foreach (ChatState c in all[x.Name])
+                {
+                    count++;
+                    string what = c.State == ChatStates.Tool ? c.Tool + (c.Detail.Length > 0 ? ": " + c.Detail : "") : c.State;
+                    Console.WriteLine("{0}  {1}  {2}  {3}", x.Name, c.Title.Length > 0 ? c.Title : c.Session, what, c.Subs.Count > 0 ? "(+" + c.Subs.Count + " sub-agents)" : "");
+                }
+            if (count == 0) Console.WriteLine(Loc.T("No chats reported yet. Install the hooks with: claude-together hooks install"));
+            return ExitOk;
         }
 
         static int IntOption(Args a, string name, int fallback)

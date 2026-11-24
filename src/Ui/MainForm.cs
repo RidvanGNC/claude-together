@@ -174,7 +174,7 @@ namespace ClaudeTogether
             {
                 foreach (Account a in c.Accounts)
                 {
-                    if (Core.Ready(a)) Core.StartDesktop(a);
+                    if (a.IsClaude && Core.Ready(a)) Core.StartDesktop(a);
                     System.Threading.Thread.Sleep(1500);
                 }
             });

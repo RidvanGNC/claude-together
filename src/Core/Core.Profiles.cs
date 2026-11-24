@@ -47,8 +47,13 @@ namespace ClaudeTogether
         /// <summary>Replaces an item in a profile with a link to the shared store. Existing content is merged first and kept aside.</summary>
         static void LinkShared(string profile, string item, bool isDir, string stamp, Action<string> log)
         {
+            LinkShared(profile, Paths.Store, item, isDir, stamp, log);
+        }
+
+        static void LinkShared(string profile, string store, string item, bool isDir, string stamp, Action<string> log)
+        {
             string link = Path.Combine(profile, item);
-            string dest = Path.Combine(Paths.Store, item);
+            string dest = Path.Combine(store, item);
             if (isDir ? !Directory.Exists(dest) : !File.Exists(dest)) return;
 
             bool exists = isDir ? Directory.Exists(link) : File.Exists(link);
@@ -90,9 +95,8 @@ namespace ClaudeTogether
         }
 
         /// <summary>Creates a profile folder (optionally seeded from ~/.claude) and links the shared items into it.</summary>
-        static void InitProfile(string name, bool fromSource, bool keepCreds, Action<string> log)
+        static void InitProfile(string name, string target, bool fromSource, bool keepCreds, Action<string> log)
         {
-            string target = Paths.ProfileDir(name);
             string stamp = Stamp();
             string targetJson = Path.Combine(target, ".claude.json");
 
@@ -238,23 +242,47 @@ namespace ClaudeTogether
                 string t = Path.Combine(Paths.Store, f);
                 if (File.Exists(s) && !File.Exists(t)) File.Copy(s, t);
             }
-            for (int i = 0; i < cfg.Accounts.Count; i++)
-                InitProfile(cfg.Accounts[i].Name, i < 2, cfg.Accounts[i].Primary, log);
+            int n = 0;
+            foreach (Account a in cfg.Accounts)
+            {
+                if (a.IsClaude) InitProfile(a.Name, HomeDir(a), n++ < 2, a.Primary, log);
+                else InitAgentHome(a, log);
+            }
             EnsureDefaultShared(log);
             log(Loc.T("Distribution complete."));
         }
 
         public static void AddAccount(Config cfg, string name, Action<string> log)
         {
+            AddAccount(cfg, name, Providers.Claude, log);
+        }
+
+        /// <summary>
+        /// Adds an account of an agent. Its home folder is made in AGENT_BASE (CLAUDE_BASE or CHATGPT_BASE) with the shared items linked
+        /// in. The name must be free for every agent, because the office knows its workers by name.
+        /// </summary>
+        public static void AddAccount(Config cfg, string name, string provider, Action<string> log)
+        {
             string err = ValidateName(name);
             if (err != null) throw new InvalidOperationException(err);
             name = name.Trim();
             if (Find(cfg, name) != null) throw new InvalidOperationException(Loc.T("This name is already in use."));
+            if (!Providers.Known(provider)) throw new InvalidOperationException(Loc.T("Unknown agent: {0}", provider));
 
-            Directory.CreateDirectory(Paths.Store);
-            foreach (string d in SharedDirs) Directory.CreateDirectory(Path.Combine(Paths.Store, d));
-            InitProfile(name, false, false, log);
-            cfg.Accounts.Add(new Account { Name = name, Desktop = Account.SecondaryMode });
+            Account a = new Account { Name = name, Provider = provider, Dir = Providers.NewHome(provider, name) };
+            if (a.IsClaude)
+            {
+                a.Desktop = Account.SecondaryMode;
+                Directory.CreateDirectory(Paths.Store);
+                foreach (string d in SharedDirs) Directory.CreateDirectory(Path.Combine(Paths.Store, d));
+                InitProfile(name, a.Dir, false, false, log);
+            }
+            else
+            {
+                a.Desktop = Account.NoDesktop;
+                InitAgentHome(a, log);
+            }
+            cfg.Accounts.Add(a);
             Save(cfg);
         }
 

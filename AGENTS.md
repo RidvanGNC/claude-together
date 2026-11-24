@@ -2,25 +2,25 @@
 
 Guide for AI assistants working with or inside this repository. Humans: see [README.md](README.md).
 
-**Project:** `claude-together`, a Windows tool that runs several Claude accounts side by side on one PC.
+**Project:** `claude-together`, a Windows tool that runs several accounts of Claude and ChatGPT (Codex) side by side on one PC.
 **Binaries:** `ClaudeTogether.exe` (GUI) and `claude-together.exe` (CLI), built from the same C# 5 source.
 **License:** MIT, © 2026 Rıdvan Gonca. Keep the copyright header in every source file.
 
 ## Scope: your own accounts, on your own computer
 
-This tool is for **people working with their own Claude accounts on their own computer**: several accounts side by side, with common settings, and their own work split or handed off between them, by hand or with an agent they direct.
+This tool is for **people working with their own Claude and ChatGPT accounts on their own computer**: several accounts side by side, with common settings, and their own work split or handed off between them, by hand or with an agent they direct.
 
-It is **not** for selling, renting or sharing accounts, or for giving other people access to an account. It has no network code except the automatic update check (see below), sends no data about the user anywhere and has no remote access.
+It is **not** for selling, renting or sharing accounts, or for giving other people access to an account. It has no network code except the automatic update check and two optional features the user can switch on (the weather and the prayer times, see below), sends no data about the user or the accounts anywhere and has no remote access.
 
 As an agent you must:
 
 - Work only with accounts that belong to the user, on the user's computer.
 - **Never** help set up account sharing, resale or access for other people.
-- **Never** add network code, telemetry or remote control to this project. The one exception is the update check in `src/Core/Core.Update.cs`: a single request for the latest release of this project on GitHub (and the download of a release the user agreed to install). Do not add any other request, do not send anything about the user or the accounts, and keep the off switch working.
+- **Never** add network code, telemetry or remote control to this project. The one exception is the update check in `src/Core/Core.Update.cs`: a single request for the latest release of this project on GitHub (and the download of a release the user agreed to install). The only other requests are the two optional online features in `src/Core/Core.Online.cs` (weather and prayer times, see "Optional online features"): off until the user switches them on, one request each at a fixed rhythm, nothing but a rounded place in them. Do not add any other request, do not send anything about the user or the accounts, and keep every off switch working.
 - Run state-changing commands (`setup`, `login`, `open`, `close`, `skill install`, `install`, `uninstall`) only when the user asked for them in this conversation.
 - Use `delegate` when the user's task calls for handing work to another of their accounts (see below). Do not loop on usage-limit errors; report them to the user.
 
-Read-only commands (`list`, `scan`, `whoami`, `env`, `version`, `help`) are fine to use to answer questions.
+Read-only commands (`list`, `scan`, `whoami`, `env`, `activity`, `version`, `help`) are fine to use to answer questions. `hooks install` and `remove` change the settings of the user's agents: run them only when the user asked for it.
 
 ## Using the CLI (for the user's own terminal)
 
@@ -30,10 +30,12 @@ Windows only. Commands are written for `cmd`/PowerShell.
 | --- | --- |
 | See accounts, login and running state | `claude-together list` (add `--json` to parse) |
 | First-time setup (backs up, then shares data) | `claude-together setup <primary> [<other>...]` |
-| Add or remove an account | `claude-together add <name>` / `remove <name>` |
-| Sign an account in | `claude-together login <name>` |
+| Add or remove an account | `claude-together add <name> [--provider claude\|chatgpt]` / `remove <name>` |
+| Sign an account in | `claude-together login <name>` (ChatGPT: runs `codex login` with the account's `CODEX_HOME`) |
 | Open or close Claude Desktop | `claude-together open [<name>...] [--all]` / `close ...` |
-| Run Claude Code as an account | `claude-together run <name> [-- <cmd>]` (default `claude`) |
+| Run Claude Code (or Codex) as an account | `claude-together run <name> [-- <cmd>]` (default `claude` or `codex`) |
+| What each chat is doing | `claude-together activity [--json]` (needs the hooks) |
+| Let the agents report their chats | `claude-together hooks install` / `remove` / `status` |
 | Show an account's env vars | `claude-together env <name> --shell cmd\|powershell\|json` |
 | Find accounts, including unregistered folders | `claude-together scan --json` |
 | Which account am I, may I delegate? | `claude-together whoami --json` |
@@ -90,11 +92,43 @@ Log file: `%APPDATA%\claude-together\app.log`.
 
 ## How it works (short)
 
-- Claude Code: `CLAUDE_CONFIG_DIR=%USERPROFILE%\.claude-<name>`.
+- **Agent homes (`AGENT_BASE`):** new accounts live in `%USERPROFILE%\AGENT_BASE\CLAUDE_BASE\<name>` and `%USERPROFILE%\AGENT_BASE\CHATGPT_BASE\<name>` (`Paths.AgentBase/ClaudeBase/ChatGptBase`), so the user folder does not fill up. The folder of an account is stored with it (`Account.Dir`, in `profiles.json`); an account without one is from an earlier version and keeps `%USERPROFILE%\.claude-<name>` (`Core.HomeDir`). Nothing is moved: a home may be in use. Always go through `Core.HomeDir(account)`, never build `.claude-<name>` yourself.
+- **Providers** (`src/Core/Providers.cs`): `claude` and `chatgpt`. What differs is in one place: the command, the home variable (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), the base folder, the shared items, how a sign-in looks (`Providers.SignedIn`: Codex keeps it in `auth.json`). `Account.Provider` is "claude" when a config file has none. Names are unique across providers (the office knows workers by name). A ChatGPT account has no window (`Desktop` = `none`): no Desktop code runs for it (`IsRunning` is false, `open`/`close` skip it); `open` in the GUI starts a terminal with `codex`, `login` runs `codex login`. `Core.InitAgentHome` links `sessions`, `skills`, `prompts` and `AGENTS.md` from `CHATGPT_BASE\shared` and writes `cli_auth_credentials_store = "file"` to the account's `config.toml` (otherwise Codex may use the Windows credential store and every account would share one sign-in). `delegate` is Claude only for now.
+- Claude Code: `CLAUDE_CONFIG_DIR` = the account's home.
 - Claude Desktop: `--user-data-dir=%APPDATA%\Claude-<name>` (the primary account keeps `%APPDATA%\Claude`).
 - Shared data lives in `%USERPROFILE%\.claude-shared` and is linked into each account folder (junctions for folders, symlinks for files).
 - **The default folder shares too:** `Core.EnsureDefaultShared` links the shared folders of `%USERPROFILE%\.claude` to the store (at `Distribute` and in `StartDesktop`, never while Claude Desktop runs). A Claude started outside the tool has no `CLAUDE_CONFIG_DIR` and would otherwise write chats where the accounts cannot find them ("not found on disk"). Existing content is merged with `CopyMissing` (files the store lacks only, never an overwrite) and the old folder is kept as `.pre-share-<stamp>`. Keep it that way: never overwrite a store file with a default-folder one.
 - **Login station:** the `claude://` callback always opens the normal Claude instance. For a non-primary account the tool parks `%APPDATA%\Claude`, starts a clean Claude, waits for the user to sign in and quit, copies the result to `Claude-<name>`, and restores the parked data. `RecoverStation()` undoes an interrupted station.
+
+## Optional online features (the weather and the prayer times)
+
+The user's own wish (2026-11-24): the weather in the windows and workers who pray at the prayer times. Both need the internet, so both are **off until the user switches them on** in the menu ("Online (optional)"), switching on shows a dialog that says exactly what is asked of whom, and `CLAUDE_TOGETHER_NO_ONLINE=1` turns both off for good. `Online` (`Core.Online.cs`): the user types the name of their city (sent once to `geocoding-api.open-meteo.com`, the result is kept as coordinates rounded to two decimals in `settings.json`); the weather is one request to `api.open-meteo.com` every half hour (coordinates only); the prayer times are one request to `api.aladhan.com` per day (coordinates and the date; method 13, the Turkish Presidency of Religious Affairs). User-Agent `claude-together/<version>`, 8 second timeout, a failed request is tried again after five minutes and never reaches the user as an error. Nothing about accounts, folders, chats or the machine is ever in a request; do not add anything to them, and do not add other features that need the internet without the user asking and this section changed first. Parsing is pure and tested (`ParseWeather`, `ParsePrayerDay`, `PrayerDue`); `CLAUDE_TOGETHER_ONLINE_FEED=<folder>` with `place.json`, `weather.json`, `prayer.json` stands in for the internet in tests and screenshots. `OnlineFlow` (`src/Ui/OnlineUi.cs`) runs the timers; `FloorView.SetWeather` makes the windows show clouds, rain, snow, fog or a storm (`FloorAnim.WeatherTint`, `WeatherParticles`) and `SetPrayerDay` makes `StepPrayer` call `Crowd.CallToPrayer` at each prayer time.
+
+## Two floors and the elevator
+
+The building has two floors of the same size (30 x 17 tiles), each a `Layout` (`Layout.Level` 0 or 1). Level 0 is the office (`FloorPlan.Build(office)`, the player decorates it, the workers live there). Level 1 is `FloorPlan.BuildUpper()`: lobby, corridor, two meeting rooms, storage, prayer room (mescit), tea house (çayhane); fixed, not decorated. The **elevator** (`PropKind.Elevator`, hung on columns 3 and 4 of row 0, `FloorPlan.ElevatorWall`, with `ElevatorFront` kept clear) is on both floors above the same spot, next to the front door; saved offices from before it lose only what stood there (`Decorating.OnElevator`). Doors of the upper floor are `DoorKind.Room`: cut into a wall face (a back row) like the front door, drawn by `FloorAnim.DoorAt`, joining a corridor tile with a room tile. New art goes in `FloorArt.Upper.cs`; lights for the floor above are `FloorArt.UpperEmitters`.
+
+`FloorView` keeps `layout` (ground) for everything about workers and desks and adds `upper`, `level`, `Shown`. Clicking the elevator (usual view only; `ElevatorAt`) starts `UseElevator`: the building fades to black (`FadeSeconds` 0.35 each way, driven by `Tick`, so tests can `Simulate` it), the floor switches in the dark, the picture comes back. The workers keep walking downstairs while the floor above is shown (the crowd is stepped always, drawn only at level 0). The floor above is shown in view 0 only: going up remembers the view and turns to 0 (`rotBeforeStairs`; `HomePage` does not save that as the player's choice, see `Upstairs`), coming down turns it back; there is no rotate or decorate button upstairs. The floor above has no animated workers yet, no turned views and no wall-hung things in turned views, like the ground floor.
+
+## The life in the building (workers, cleaner, robot)
+
+All in `src/World/Crowd*.cs` (`Crowd` is a partial class; one file per concern) and drawn by `FloorNpc*.cs`; pure data and rules, tested in `tests/UpperTests.cs`.
+
+- **Two floors, one crowd.** A worker has a `Level`; a `Spot` has one. `GoTo` to a spot on the other floor walks to the elevator spot (`UpperSpots.Lift`, the same tiles on both floors), rides (2.4 s, out of sight, `LiftOpen` opens the door in `FloorAnim`) and walks on from the elevator on the other floor (`BeginRide`, `FinishRide`). The crowd keeps running whichever floor is shown.
+- **Upstairs places** (`UpperSpots.Errands`): stand at the tea counter (`Pose.Tea`: fill a glass, drink), sit on a stool, pray on a rug (`Pose.Pray`: stand, bow, kneel, sit), sit at a meeting table, present in front of the screen (`Pose.Present`). The tea plan (and the phone plan) are only in `BuildPlan` when the crowd has a floor above: a crowd made without one (`new Crowd(layout, seed)`) lives exactly as before.
+- **Meetings.** Workers whose chats have the same working folder (`Crowd.Projects`, set by the floor view from the chats) meet in a free meeting room when two or more of them (helpers count) are around, every few minutes (`TryStartMeetings`, `Meeting`): one presents, turning now and then between the people and the screen; while it looks at the screen each listener has a 25 percent chance to spin once on its chair (`SpinLeft`). A sub-agent of a chat (`Crowd.Helpers`) is a helper worker in a grey-blue shirt who comes along and is gone afterwards.
+- **Prayer.** `CallToPrayer` (called at each prayer time when the online feature is on): free workers, and 60 percent of the busy ones, go to a rug, pray, and go back.
+- **Phone and meal.** A worker rings up on the wall phone (`PropKind.Phone`, column 16 of the back wall, `FloorPlan.PhoneWall/PhoneFront`); 30 to 50 seconds later a courier comes to the front door (`Crowd.Orders`), hands over the bag and leaves; the worker eats at a table in the kitchen, washes its hands and goes back (`Npc.Delivery` keeps a busy worker from being sent back to the desk meanwhile).
+- **The line for the toilets.** When every cabin is taken the worker waits in the hall (`TryQueue`, places in `QueueSpots`); after 10 seconds its face goes red, over 20 more seconds fully (`Npc.Blush`); the handle of each cabin door is red while somebody is in or on the way (`Crowd.CabinBusy`), green otherwise.
+- **Staff** (`Crowd.Cleaning.cs`, only with a floor above, with a random generator of their own so the days of the workers do not change): the **cleaner** sits in the tea house, picks up rubbish, mops a line of tiles (each is wet for `WetSeconds`; 40 percent of the time she puts out a sign first) and changes a water jug when a cooler has been used `JugLife` (5) times (new jug from the storage room, the empty one back there). A worker who steps on a wet tile slips with 40 percent (`SlipLeft`: falls, lies, gets up). The **robot** wanders about the office on random ways; on a wet tile it spins and slides on. A **bin** pressed six times in six seconds spills rubbish (`SpillLitter`) that stays until the cleaner has picked it up. The cleaner and robot are drawn in the usual view only (not in the turned views, like everything that is not furniture).
+
+## What each chat is doing (hooks)
+
+Off by default (`AppSettings.TrackActivity`, menu: "Show what the agents are doing"; `hooks install` in the CLI). Turning it on puts one command into the settings of the agents (`src/Core/Core.HookConfig.cs`): Claude Code `settings.json` (exec form: `command` = `claude-together.exe`, `args` = `["hook","claude"]`, `async`), Codex `hooks.json` in each ChatGPT home (`command`/`commandWindows`; Codex asks the user to trust the hook once with `/hooks`). Only our own entries are ever added, changed or removed (`IsOurs`), the user's other hooks and settings are kept, a changed file is copied aside first, a file that is not valid JSON is left alone, and no settings file is created while a shared `settings.json` exists (linking it later could replace the shared one). The app puts the hooks right again at start when they are on (the program may have moved).
+
+At each step of a chat the agent starts `claude-together hook <claude|chatgpt>` and writes the event to its standard input. `Core.RecordHook` (`Core.Hooks.cs`) turns it into one small file per chat in `%APPDATA%\claude-together\activity\<account>\<session>.json` (state `idle`/`thinking`/`tool`/`waiting`/`compacting`, the tool and what it does, the title from the first prompt, sub-agents, times). `Core.Apply` is the pure state machine (tested); `Core.Chats` reads the files (a busy chat without news for 20 minutes counts as idle, files untouched for 6 hours are forgotten). The hook prints nothing (what a hook prints can become part of the chat), never fails and never blocks. Local files only, no network. `Core.PresenceOf` still reads Claude Code's own `sessions\<pid>.json`; the chats from the hooks are added to it (`Core.Presences`), and they are the only source for a ChatGPT account.
+
+On the floor: clicking a worker opens the `AgentCard` (`src/Ui/AgentCard.cs`, pixel art: the chats, what each does, how long, helpers, an Open button); a worker whose chat waits for the user shows a blinking "!" (`FloorNpc.Bubble`); the tooltip of a worker says what its first chat does.
 
 ## Integrating into your own project
 
@@ -126,6 +160,18 @@ src/Ui/FloorArt.Rot.cs  the turned views: ViewGeo (picture size per view), the f
 src/World/Pool.cs     the pool game: physics and the player's shot choice
 src/Ui/FloorNpc.cs    draws a worker (4 directions, walking step, typing, sitting, washing, pool, arcade); the look comes from the account name
 src/Core/Core.Activity.cs  what an account is doing: Claude Code's sessions\<pid>.json (busy or idle, pid alive) and whether Claude Desktop runs; local reads only
+src/Core/Providers.cs  the agents (claude, chatgpt): command, home variable, base folder, shared items, sign-in check
+src/Core/Core.Homes.cs  HomeDir, agent homes, the Codex credentials setting, terminal and sign-in for ChatGPT accounts
+src/Core/Core.Hooks.cs  what a chat is doing: reading hook calls, the state machine, the per-chat files, words for the status
+src/Core/Core.HookConfig.cs  putting the hook into (and taking it out of) the settings of the agents
+src/Ui/AgentCard.cs   the card of a worker: its chats and what they do
+src/World/Crowd.Floors.cs  two floors: the elevator, tea, prayer, meetings and their helpers, the places upstairs
+src/World/Crowd.Cleaning.cs  the cleaner, the robot, rubbish, wet floors and slipping, water jugs
+src/World/Crowd.Orders.cs  the wall phone, the courier and the meal, the line for the toilets
+src/Core/Core.Online.cs  the optional weather and prayer times (the program's only other network access)
+src/Ui/OnlineUi.cs    the timers of the online features
+src/Ui/FloorNpc.Staff.cs  how rubbish, wet floors, signs, the robot, a worker who slipped and the cleaner look
+src/Ui/FloorArt.Upper.cs  the art of the floor above and of the elevator: floors, wall faces, meeting tables and screens, prayer rugs and niche, tea counter, shelves, jugs, door signs
 src/Ui/FloorAnim.cs   the moving parts (street in the windows, clocks, doors, arcade, taps, kitchen) drawn over the fixed picture
 src/Core/Core.Office.cs  LoadOffice / SaveOffice: office.json in %APPDATA%\claude-together
 installer/            MSI source (WiX v5, per-user, no admin) and license.rtf
@@ -134,7 +180,7 @@ src/Localization.cs   Loc.T(en, args) with a Turkish table
 src/Core/             paths, config, files, profiles, desktop process handling,
                       Core.Agents.cs (scan, whoami, delegate, skill), AgentKit.cs (skill text)
 src/Ui/               WinForms pages, custom-drawn controls, dialogs
-tests/                core tests (Mono): sh tests/run.sh
+tests/                core tests (Mono): sh tests/run.sh (AgentTests.cs: agents, hooks, chats)
 assets/app.ico        icon
 build.cmd / build.sh  Windows csc / Mono mcs builds
 ```
@@ -154,6 +200,8 @@ sh tests/run.sh     # core tests, expects ALL PASS
 
 **Installer and releases:** `installer/ClaudeTogether.wxs` builds a per-user MSI (WiX v5, no admin rights, installs to `%LOCALAPPDATA%\Programs\ClaudeTogether`). `.github/workflows/build.yml` builds, tests, installs and uninstalls it on a Windows runner, and publishes a release when a `v<version>` tag is pushed. The portable zip has `claude-together install` / `uninstall` (`src/Installer.cs`) for the same per-user folder, PATH entry and shortcut; both refuse to run when the MSI is installed, so the two never fight over the same files. Release steps: raise `Version` in `src/Cli.cs` (the only place; `AssemblyInfo.cs` and the MSI take it from there), commit, push to `main`. The workflow creates the tag `v<version>` and the release itself when that version has no tag yet. Do not tag by hand, and do not raise the version unless the user asked for a release: a pushed new version is published at once.
 
+`CLAUDE_TOGETHER_HOME` (tests only) moves the user profile, AppData\Roaming and AppData\Local into one folder, so a test can run on Windows without touching the real accounts. Use it for anything that writes settings or homes; never run the core tests against the real profile.
+
 The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claude Desktop. Check those on real Windows.
 
 ## Conventions
@@ -162,7 +210,7 @@ The Linux test run cannot cover WMI, `mklink`, robocopy, DWM, or launching Claud
 - C# 5 only: no string interpolation, no `?.`, no expression-bodied members. Declare `using WinTimer = System.Windows.Forms.Timer;` per file that uses it.
 - Every user-facing string goes through `Loc.T("English", args)` and needs a Turkish entry in `Localization.cs`. The brand "Claude Together" is not translated.
 - Keep the copyright header ("Rıdvan Gonca") at the top of every source file.
-- No network code except the automatic update check (`Updates` in `src/Core/Core.Update.cs`). No telemetry.
+- No network code except the automatic update check (`Updates` in `src/Core/Core.Update.cs`) and the two optional online features (`Online` in `src/Core/Core.Online.cs`). No telemetry.
 - The MSI stays per-user: no elevation, no `ALLUSERS`, no HKLM, no machine-wide folders. The workflow checks this.
 - Never delete user data. Move it aside with a suffix instead.
 - Add a core test for any change to config, linking, backup, or station recovery.

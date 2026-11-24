@@ -8,16 +8,19 @@ namespace ClaudeTogether
     // Units are tiles (16 px when drawn). Walls run along tile boundaries; the first row of most rooms is a
     // "back wall" row that shows the wall face (windows, cabinets) and cannot be walked on.
 
-    enum RoomKind { Office, Cabin, Hall, Kitchen, Game }
+    enum RoomKind { Office, Cabin, Hall, Kitchen, Game, Lobby, Corridor, Meeting, Prayer, Tea, Storage }
 
     enum PropKind
     {
         Plant, Rug, Sink, SinkCounter, Mirror, Counter, Stove, Fridge, Cooler, Coffee, SmallTable, Chair,
         Billiard, Arcade, Sofa, Armchair, BeanBag, SideTable, Vending, Bin, Lamp,
-        Window, Clock, Poster, DartBoard, UpperCabinets, Bookshelf, Whiteboard, CueRack, NeonSign
+        Window, Clock, Poster, DartBoard, UpperCabinets, Bookshelf, Whiteboard, CueRack, NeonSign,
+        // the upper floor
+        Elevator, Bench, MeetTable, MeetChair, Screen, PrayerRug, Mihrab, ShoeRack, TeaCounter, TeaTable, Stool, Shelf, Boxes, Jugs, DoorSign, Phone
     }
 
-    enum DoorKind { Main, Opening, Cabin }
+    /// <summary>Main: the front door. Opening: a gap in a vertical wall. Cabin: a toilet cabin. Room: a door in the wall face (the back row) of a room of the upper floor.</summary>
+    enum DoorKind { Main, Opening, Cabin, Room }
 
     sealed class TileRect
     {
@@ -88,6 +91,8 @@ namespace ClaudeTogether
 
     sealed class Layout
     {
+        /// <summary>0 the ground floor (the office), 1 the floor above.</summary>
+        public int Level;
         public List<Room> Rooms = new List<Room>();
         public List<Wall> Walls = new List<Wall>();
         public List<Door> Doors = new List<Door>();
@@ -216,7 +221,7 @@ namespace ClaudeTogether
                 for (int x = b.X; x < b.X + b.W; x++)
                     for (int y = b.Y; y < b.Y + b.H; y++) walk[x, y] = false;
             foreach (Door d in Doors)
-                if (d.Kind == DoorKind.Main) for (int i = 0; i < d.Len; i++) walk[d.X + i, d.Y] = true;   // the way in, through the back wall row
+                if (d.Kind == DoorKind.Main || d.Kind == DoorKind.Room) for (int i = 0; i < d.Len; i++) walk[d.X + i, d.Y] = true;   // the way in, through the back wall row
             foreach (Prop p in Props)
             {
                 if (!p.Blocks || p.OnWall) continue;
@@ -239,6 +244,13 @@ namespace ClaudeTogether
         public const int Tile = 16;
         public const int MaxDesks = 10;
         public const int PixelOx = 8;     // where tile column 0 starts in the picture
+        /// <summary>The elevator hangs on the back wall of both floors, next to the front door: columns 3 and 4 of row 0.</summary>
+        public static readonly TileRect ElevatorWall = new TileRect(3, 0, 2, 1);
+        /// <summary>Where people stand to call it: nothing is put here.</summary>
+        public static readonly TileRect ElevatorFront = new TileRect(3, 1, 2, 2);
+        /// <summary>The telephone on the back wall of the office (columns 16) and the place to stand in front of it.</summary>
+        public static readonly TileRect PhoneWall = new TileRect(16, 0, 1, 1);
+        public static readonly TileRect PhoneFront = new TileRect(16, 1, 1, 1);
 
         /// <summary>
         /// The picture columns (first and last) of the street strip that each window shows, from left to right.
@@ -336,6 +348,13 @@ namespace ClaudeTogether
                 else if (d.Kind == DoorKind.Opening) l.KeepClear.Add(new TileRect(16, d.Y - 1, 2, d.Len + 2));   // 2 wide, 4 tall in front of the others
             }
 
+            // the elevator next to the front door, and room to stand in front of it
+            Hung(l, PropKind.Elevator, ElevatorWall.X, ElevatorWall.Y, ElevatorWall.W, ElevatorWall.H, 0);
+            l.KeepClear.Add(ElevatorFront);
+            // the telephone on the wall: workers ring up for a meal
+            Hung(l, PropKind.Phone, PhoneWall.X, PhoneWall.Y, 1, 1, 0);
+            l.KeepClear.Add(PhoneFront);
+
             // main office: windows belong to the building, the rest comes from the player's state
             Hung(l, PropKind.Window, 6, 0, 2, 1, 0);
             Hung(l, PropKind.Window, 10, 0, 2, 1, 0);
@@ -399,6 +418,145 @@ namespace ClaudeTogether
 
             l.Finish();
             return l;
+        }
+
+        /// <summary>
+        /// The floor above: a lobby with the elevator, two meeting rooms and a storage room along the street, a corridor, and the prayer
+        /// room and the tea house along the back. Fixed (the player does not decorate it). Same size as the office, so the building
+        /// has one shape. Every door is cut into a wall face (a back row) and leads to a corridor tile or to a room.
+        /// </summary>
+        public static Layout BuildUpper()
+        {
+            Layout l = new Layout();
+            l.Level = 1;
+
+            AddRoom(l, RoomKind.Lobby, "Lobby", false, new TileRect(0, 0, 6, 6));
+            AddRoom(l, RoomKind.Meeting, "Meeting room 1", false, new TileRect(6, 0, 8, 6));
+            AddRoom(l, RoomKind.Meeting, "Meeting room 2", false, new TileRect(14, 0, 8, 6));
+            AddRoom(l, RoomKind.Storage, "Storage", false, new TileRect(22, 0, 8, 6));
+            AddRoom(l, RoomKind.Corridor, "Corridor", false, new TileRect(0, 6, 30, 3));
+            AddRoom(l, RoomKind.Prayer, "Prayer room", false, new TileRect(0, 9, 10, 8));
+            AddRoom(l, RoomKind.Tea, "Tea house", false, new TileRect(10, 9, 20, 8));
+
+            // the first row of a room is the face of its back wall; the last row stays empty
+            foreach (TileRect r in new[] { new TileRect(0, 0, 6, 1), new TileRect(6, 0, 8, 1), new TileRect(14, 0, 8, 1), new TileRect(22, 0, 8, 1), new TileRect(0, 6, 30, 1), new TileRect(0, 9, 10, 1), new TileRect(10, 9, 20, 1) })
+                l.BackRows.Add(r);
+            foreach (TileRect r in new[] { new TileRect(0, 5, 6, 1), new TileRect(6, 5, 8, 1), new TileRect(14, 5, 8, 1), new TileRect(22, 5, 8, 1), new TileRect(0, 8, 30, 1), new TileRect(0, 16, 10, 1), new TileRect(10, 16, 20, 1) })
+                l.LastRows.Add(r);
+
+            l.Walls.Add(new Wall(0, 0, 30, 0));
+            l.Walls.Add(new Wall(0, 17, 30, 17));
+            l.Walls.Add(new Wall(0, 0, 0, 17));
+            l.Walls.Add(new Wall(30, 0, 30, 17));
+            l.Walls.Add(new Wall(0, 6, 30, 6));       // rooms along the street | corridor
+            l.Walls.Add(new Wall(0, 9, 30, 9));       // corridor | rooms along the back
+            l.Walls.Add(new Wall(6, 0, 6, 6));
+            l.Walls.Add(new Wall(14, 0, 14, 6));
+            l.Walls.Add(new Wall(22, 0, 22, 6));
+            l.Walls.Add(new Wall(10, 9, 10, 17));
+
+            // doors: two tiles wide, each next to its sign
+            l.Doors.Add(new Door(DoorKind.Room, 1, 6, 2, true));      // lobby
+            l.Doors.Add(new Door(DoorKind.Room, 8, 6, 2, true));      // meeting room 1
+            l.Doors.Add(new Door(DoorKind.Room, 16, 6, 2, true));     // meeting room 2
+            l.Doors.Add(new Door(DoorKind.Room, 24, 6, 2, true));     // storage
+            l.Doors.Add(new Door(DoorKind.Room, 1, 9, 2, true));      // prayer room
+            l.Doors.Add(new Door(DoorKind.Room, 12, 9, 2, true));     // tea house
+
+            // lobby: the elevator (above the same spot as on the ground floor), a bench, plants
+            Hung(l, PropKind.Elevator, ElevatorWall.X, ElevatorWall.Y, ElevatorWall.W, ElevatorWall.H, 1);
+            l.KeepClear.Add(ElevatorFront);
+            Hung(l, PropKind.Clock, 1, 0, 1, 1, 1);
+            Hung(l, PropKind.Poster, 5, 0, 1, 1, 1);
+            Decor(l, PropKind.Rug, 1, 2, 4, 3, 3);
+            Floor(l, PropKind.Bench, 0, 4, 2, 1, 0);
+            Floor(l, PropKind.Plant, 5, 1, 1, 1, 0);
+            Floor(l, PropKind.Plant, 5, 4, 1, 1, 0);
+
+            // meeting room 1: a screen on the back wall for whoever presents, a table with chairs round it
+            Hung(l, PropKind.Window, 6, 0, 2, 1, 1);
+            Hung(l, PropKind.Screen, 8, 0, 4, 1, 0);
+            Hung(l, PropKind.Whiteboard, 12, 0, 2, 1, 0);
+            Floor(l, PropKind.MeetTable, 8, 2, 4, 2, 0);
+            MeetingChairs(l, 8);
+            Floor(l, PropKind.Plant, 6, 4, 1, 1, 0);
+            Floor(l, PropKind.Plant, 13, 4, 1, 1, 0);
+
+            // meeting room 2
+            Hung(l, PropKind.Poster, 14, 0, 2, 1, 1);
+            Hung(l, PropKind.Screen, 16, 0, 4, 1, 0);
+            Hung(l, PropKind.Window, 20, 0, 2, 1, 1);
+            Floor(l, PropKind.MeetTable, 16, 2, 4, 2, 0);
+            MeetingChairs(l, 16);
+            Floor(l, PropKind.Plant, 14, 4, 1, 1, 0);
+            Floor(l, PropKind.Plant, 21, 4, 1, 1, 0);
+
+            // storage: shelves along the back wall, boxes, a rack of water jugs
+            Hung(l, PropKind.Window, 28, 0, 2, 1, 1);
+            Floor(l, PropKind.Shelf, 22, 1, 2, 1, 0);
+            Floor(l, PropKind.Shelf, 24, 1, 2, 1, 0);
+            Floor(l, PropKind.Shelf, 26, 1, 2, 1, 0);
+            Floor(l, PropKind.Boxes, 22, 3, 1, 1, 0);
+            Floor(l, PropKind.Boxes, 23, 3, 1, 1, 1);
+            Floor(l, PropKind.Boxes, 28, 4, 1, 1, 0);
+            Floor(l, PropKind.Boxes, 29, 4, 1, 1, 1);
+            Floor(l, PropKind.Jugs, 27, 3, 2, 1, 0);
+
+            // corridor: signs beside the doors, a clock, plants at the ends
+            Hung(l, PropKind.DoorSign, 10, 6, 3, 1, 1);     // meeting room 1
+            Hung(l, PropKind.DoorSign, 18, 6, 3, 1, 2);     // meeting room 2
+            Hung(l, PropKind.DoorSign, 26, 6, 3, 1, 5);     // storage
+            Hung(l, PropKind.Clock, 5, 6, 1, 1, 1);
+            Hung(l, PropKind.Poster, 13, 6, 2, 1, 1);
+            Hung(l, PropKind.Clock, 21, 6, 1, 1, 1);
+            Floor(l, PropKind.Plant, 0, 7, 1, 1, 0);
+            Floor(l, PropKind.Plant, 29, 7, 1, 1, 0);
+
+            // prayer room: the niche on the back wall, rugs facing it, a shoe rack by the door, a shelf with books
+            Hung(l, PropKind.DoorSign, 3, 9, 3, 1, 3);
+            Hung(l, PropKind.Mihrab, 6, 9, 2, 1, 0);
+            Floor(l, PropKind.ShoeRack, 0, 10, 1, 1, 0);
+            Floor(l, PropKind.Bookshelf, 8, 10, 2, 1, 0);
+            foreach (int x in new[] { 2, 4, 6, 8 }) Decor(l, PropKind.PrayerRug, x, 12, 1, 2, x % 3);
+            foreach (int x in new[] { 3, 5, 7 }) Decor(l, PropKind.PrayerRug, x, 14, 1, 2, (x + 1) % 3);
+            Floor(l, PropKind.Plant, 0, 15, 1, 1, 0);
+            Floor(l, PropKind.Plant, 9, 15, 1, 1, 0);
+
+            // tea house: the counter with the tea urn along the back wall, little tables with stools, a rug
+            Hung(l, PropKind.DoorSign, 14, 9, 3, 1, 4);
+            Hung(l, PropKind.UpperCabinets, 17, 9, 2, 1, 0);
+            Hung(l, PropKind.UpperCabinets, 19, 9, 2, 1, 0);
+            Hung(l, PropKind.Window, 22, 9, 2, 1, 1);
+            Hung(l, PropKind.Window, 25, 9, 2, 1, 1);
+            Hung(l, PropKind.Clock, 28, 9, 1, 1, 1);
+            Floor(l, PropKind.TeaCounter, 17, 10, 4, 1, 0);
+            Floor(l, PropKind.Cooler, 21, 10, 1, 1, 0);
+            Decor(l, PropKind.Rug, 14, 12, 12, 3, 4);
+            foreach (int x in new[] { 13, 16, 19, 22, 25 }) TeaSeats(l, x, 12);
+            foreach (int x in new[] { 15, 18, 21, 24, 27 }) TeaSeats(l, x, 14);
+            Floor(l, PropKind.Plant, 29, 10, 1, 1, 0);
+            Floor(l, PropKind.Plant, 10, 15, 1, 1, 0);
+
+            l.Finish();
+            return l;
+        }
+
+        /// <summary>Chairs round a meeting table at (x, 2): four on the south side, two at each end. Chairs are not obstacles.</summary>
+        static void MeetingChairs(Layout l, int x)
+        {
+            for (int i = 0; i < 4; i++) AddProp(l, PropKind.MeetChair, x + i, 4, 1, 1, false, false, 0);       // south side, facing the table (and the screen)
+            AddProp(l, PropKind.MeetChair, x - 1, 2, 1, 1, false, false, 1);                                   // left end, facing right
+            AddProp(l, PropKind.MeetChair, x - 1, 3, 1, 1, false, false, 1);
+            AddProp(l, PropKind.MeetChair, x + 4, 2, 1, 1, false, false, 2);                                   // right end, facing left
+            AddProp(l, PropKind.MeetChair, x + 4, 3, 1, 1, false, false, 2);
+        }
+
+        /// <summary>A small round table at (x, y) with a stool on each side.</summary>
+        static void TeaSeats(Layout l, int x, int y)
+        {
+            Floor(l, PropKind.TeaTable, x, y, 1, 1, 0);
+            AddProp(l, PropKind.Stool, x - 1, y, 1, 1, false, false, 0);
+            AddProp(l, PropKind.Stool, x + 1, y, 1, 1, false, false, 1);
         }
     }
 }

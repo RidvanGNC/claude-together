@@ -57,8 +57,66 @@ namespace ClaudeTogether
         Dictionary<string, Presence> presence = new Dictionary<string, Presence>();
         bool presenceKnown;
 
+        // the two floors: 0 the office (where the workers are), 1 the floor above (lobby, meeting rooms, prayer room, tea house, storage)
+        int level;
+        int rotBeforeStairs;               // the view the office had before going up (the floor above is only shown in the usual view)
+        Layout upper = FloorPlan.BuildUpper();
+        Swing[] upperSwings;
+        Bitmap upperStatic;
+        FloorArt.LightSet upperLights;
+        int upperLightStep = -1;
+        int fadePhase;                     // 0 none, 1 going dark, 2 coming back
+        double fadeT;                      // 0 to 1 within a phase
+        int fadeTarget;
+        const double FadeSeconds = 0.35;
+
+        // the optional online features: the weather in the windows, the prayer times
+        WeatherNow weather;
+        PrayerDay prayerDay;
+        int prayerLast = -1;
+
+        // what the chats do: the card of a worker, and the "!" over a worker whose chat waits for the user
+        Dictionary<string, List<ChatState>> chats = new Dictionary<string, List<ChatState>>(StringComparer.OrdinalIgnoreCase);
+        bool tracking;                     // the hooks are switched on
+        DateTime chatsAt = DateTime.UtcNow;
+        AgentCard card;
+        Rectangle cardAnchor;
+
         /// <summary>Set by whatever moves people around (later the little workers): somebody is in the toilets.</summary>
         public bool ToiletInUse { get; set; }
+
+        /// <summary>The weather outside (null: not known or switched off).</summary>
+        public void SetWeather(WeatherNow w)
+        {
+            weather = w;
+            if (composite != null) { Compose(); Invalidate(); }
+        }
+
+        /// <summary>The prayer times of today (null: not known or switched off). At each one the workers go to the prayer room.</summary>
+        public void SetPrayerDay(PrayerDay d)
+        {
+            if (d == null || prayerDay == null || prayerDay.Date != d.Date) prayerLast = -1;
+            prayerDay = d;
+        }
+
+        public bool HasPrayerDayFor(DateTime date) { return prayerDay != null && prayerDay.Date == date.Date; }
+
+        void StepPrayer()
+        {
+            if (prayerDay == null || crowd == null) return;
+            if (prayerDay.Date != clockNow.Date) return;
+            int due = Online.PrayerDue(prayerDay, clockNow, prayerLast);
+            if (due < 0) return;
+            prayerLast = due;
+            crowd.CallToPrayer();
+        }
+
+        /// <summary>True while the floor above is shown.</summary>
+        public bool Upstairs { get { return level == 1; } }
+        public int Level { get { return level; } }
+
+        /// <summary>The layout of the floor that is shown.</summary>
+        Layout Shown { get { return level == 1 ? upper : layout; } }
 
         /// <summary>Called with the account and "open", "login" or "menu".</summary>
         public Action<Account, string> Act;
@@ -87,7 +145,14 @@ namespace ClaudeTogether
             if (composite != null) { Compose(); Invalidate(); }
         }
 
-        List<HudButton> HudButtons() { return FloorHud.Buttons(hud, editing, geo); }
+        List<HudButton> HudButtons()
+        {
+            if (level == 0) return FloorHud.Buttons(hud, editing, geo);
+            HudModel m = new HudModel();             // upstairs there is nothing to decorate and the view cannot be turned
+            m.Sub = hud.Sub; m.Status = hud.Status; m.Busy = hud.Busy; m.RunText = hud.RunText; m.ViewText = hud.ViewText; m.DecorateText = hud.DecorateText;
+            m.ShowView = hud.ShowView;
+            return FloorHud.Buttons(m, editing, geo);
+        }
 
         public FloorView()
         {
@@ -96,8 +161,15 @@ namespace ClaudeTogether
             BackColor = Theme.Bg;
             layout = FloorPlan.Build(office);
             NewSwings();
+            NewUpperSwings();
             anim.Interval = 66;                     // about 15 pictures a second
             anim.Tick += OnTick;
+        }
+
+        void NewUpperSwings()
+        {
+            upperSwings = new Swing[upper.Doors.Count];
+            for (int i = 0; i < upperSwings.Length; i++) upperSwings[i] = new Swing();
         }
 
         void NewSwings()
@@ -150,7 +222,10 @@ namespace ClaudeTogether
         void Tick(double seconds)
         {
             StepCrowd(seconds);
+            StepPrayer();
+            StepFade(seconds);
             for (int i = 0; i < swings.Length; i++) swings[i].Step(NearDoor(i), seconds);
+            for (int i = 0; i < upperSwings.Length; i++) upperSwings[i].Step(NearUpperDoor(i), seconds);
             double target = ToiletOccupied() ? 1.0 : 0.0;
             if (target > toiletFade) toiletFade = Math.Min(target, toiletFade + 6.0 * seconds);      // on quickly, off slowly
             else toiletFade = Math.Max(target, toiletFade - 3.0 * seconds);
@@ -184,9 +259,19 @@ namespace ClaudeTogether
         void StepCrowd(double seconds)
         {
             if (editing || !presenceKnown) return;
-            if (crowd == null) crowd = new Crowd(layout, 20260);
+            if (crowd == null) crowd = new Crowd(layout, upper, 20260);
             Dictionary<string, int> deskOf = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < office.Desks.Count; i++) if (office.Desks[i].Account != null) deskOf[office.Desks[i].Account] = i;
+            // what the workers are working on, so that those on the same work can meet
+            crowd.Projects.Clear();
+            crowd.Helpers.Clear();
+            foreach (KeyValuePair<string, List<ChatState>> kv in chats)
+            {
+                int helpers = 0;
+                foreach (ChatState c in kv.Value) helpers += c.Subs.Count;
+                if (helpers > 0) crowd.Helpers[kv.Key] = helpers;
+                if (kv.Value.Count > 0 && !string.IsNullOrEmpty(kv.Value[0].Cwd)) crowd.Projects[kv.Key] = kv.Value[0].Cwd.Trim().TrimEnd('\\', '/').ToLowerInvariant();
+            }
             crowd.Update(seconds, PresenceMap(), deskOf, delegate(string key) { active.Activate(key, clockMs, FloorAnim.Duration(key)); });
         }
 
@@ -194,7 +279,8 @@ namespace ClaudeTogether
         void DoorCenter(Door d, out double cx, out double cy, out double reach)
         {
             reach = 26;
-            if (d.Kind == DoorKind.Main) { cx = FloorArt.X(d.X) + d.Len * 8; cy = FloorArt.Y(d.Y) + 8; }
+            if (d.Kind == DoorKind.Room) { cx = FloorArt.X(d.X) + d.Len * 8; cy = FloorArt.Y(d.Y) + 8; reach = 24; }
+            else if (d.Kind == DoorKind.Main) { cx = FloorArt.X(d.X) + d.Len * 8; cy = FloorArt.Y(d.Y) + 8; }
             else if (d.Kind == DoorKind.Opening) { cx = FloorArt.X(d.X); cy = FloorArt.Y(d.Y) + d.Len * 8; }
             else { cx = FloorArt.X(d.X) + 8; cy = FloorArt.Y(d.Y - 2) + 25; reach = 18; }
         }
@@ -205,12 +291,26 @@ namespace ClaudeTogether
             if (editing) return false;
             double cx, cy, reach;
             DoorCenter(layout.Doors[i], out cx, out cy, out reach);
-            if (rot == 0 && mouseLogical.HasValue)
+            if (level == 0 && rot == 0 && mouseLogical.HasValue)
             {
                 double dx = mouseLogical.Value.X - cx, dy = mouseLogical.Value.Y - cy;
                 if (Math.Sqrt(dx * dx + dy * dy) < reach) return true;
             }
             return crowd != null && crowd.Near((cx - FloorArt.Ox) / 16.0, (cy - FloorArt.Oy) / 16.0, reach / 16.0);
+        }
+
+        /// <summary>A door of the floor above opens when the mouse or a worker comes close to it.</summary>
+        bool NearUpperDoor(int i)
+        {
+            if (i >= upper.Doors.Count) return false;
+            double cx, cy, reach;
+            DoorCenter(upper.Doors[i], out cx, out cy, out reach);
+            if (level == 1 && mouseLogical.HasValue)
+            {
+                double dx = mouseLogical.Value.X - cx, dy = mouseLogical.Value.Y - cy;
+                if (Math.Sqrt(dx * dx + dy * dy) < reach) return true;
+            }
+            return crowd != null && crowd.Near(1, (cx - FloorArt.Ox) / 16.0, (cy - FloorArt.Oy) / 16.0, reach / 16.0);
         }
 
         /// <summary>The toilet lights are on while somebody is there: a running tap, an open cabin door, the mouse over it.</summary>
@@ -229,7 +329,9 @@ namespace ClaudeTogether
             return false;
         }
 
-        AnimFrame Frame()
+        AnimFrame Frame() { return Frame(swings, true); }
+
+        AnimFrame Frame(Swing[] doors, bool ground)
         {
             AnimFrame f = new AnimFrame();
             f.Ms = clockMs;
@@ -238,10 +340,13 @@ namespace ClaudeTogether
             f.Hour = Daylight.Hour(clockNow);
             f.Level = Daylight.Level(f.Hour);
             f.Warmth = Daylight.Warmth(f.Hour);
-            f.Doors = swings;
+            f.Doors = doors;
             f.Active = active;
             f.Traffic = Traffic.At(f.Epoch);
-            if (crowd != null) { f.Pool = crowd.Pool; f.CuesLeft = 3 - crowd.CuesTaken(); f.ChairPull = delegate(Prop pr) { return crowd.ChairPullAt(pr.X, pr.Y); }; f.CabinBroken = crowd.CabinBroken; }
+            f.Sky = weather != null ? weather.Sky : Sky.Clear;
+            f.LiftOpen = crowd != null && crowd.LiftOpen(ground ? 0 : 1);
+            if (crowd != null) { f.CoolerEmpty = crowd.JugEmpty; f.CabinBusy = crowd.CabinBusy; }
+            if (ground && crowd != null) { f.Pool = crowd.Pool; f.CuesLeft = 3 - crowd.CuesTaken(); f.ChairPull = delegate(Prop pr) { return crowd.ChairPullAt(pr.X, pr.Y); }; f.CabinBroken = crowd.CabinBroken; }
             return f;
         }
 
@@ -269,6 +374,7 @@ namespace ClaudeTogether
         {
             turns = ViewMap.Norm(turns);
             if (editing && turns != 0) return;
+            if (level == 1 && turns != 0) return;            // the floor above is only shown in the usual view
             if (turns == rot) return;
             rot = turns;
             geo = ViewGeo.Of(turns);
@@ -276,6 +382,7 @@ namespace ClaudeTogether
             if (lights != null) { lights.Dispose(); lights = null; }
             menu = null;
             menuHover = -1;
+            card = null;
             hover = -1;
             mouseLogical = null;
             hudHover = null;
@@ -307,6 +414,98 @@ namespace ClaudeTogether
             Invalidate();
         }
 
+        /// <summary>What the chats of each account are doing, and whether the hooks that tell it are on. <paramref name="nowUtc"/> is the time the ages are counted from.</summary>
+        public void SetChats(Dictionary<string, List<ChatState>> all, bool trackingOn, DateTime nowUtc)
+        {
+            chats = new Dictionary<string, List<ChatState>>(all ?? new Dictionary<string, List<ChatState>>(), StringComparer.OrdinalIgnoreCase);
+            tracking = trackingOn;
+            chatsAt = nowUtc;
+            if (card != null) PlaceCard(card.Account, cardAnchor);
+            Compose();
+            Invalidate();
+        }
+
+        List<ChatState> ChatsOf(string account)
+        {
+            List<ChatState> list;
+            return chats.TryGetValue(account, out list) ? list : new List<ChatState>();
+        }
+
+        bool Waiting(string account)
+        {
+            foreach (ChatState c in ChatsOf(account)) if (c.State == ChatStates.Waiting) return true;
+            return false;
+        }
+
+        string CardOpenText(Account a)
+        {
+            if (StateOf(a) == CardState.NeedLogin) return Loc.T("Sign in");
+            return a.IsClaude ? Loc.T("Open") : Loc.T("Terminal");
+        }
+
+        void PlaceCard(string account, Rectangle anchor)
+        {
+            Account a = accounts.FirstOrDefault(x => x.Name.Equals(account, StringComparison.OrdinalIgnoreCase));
+            if (a == null) { card = null; return; }
+            cardAnchor = anchor;
+            int hover = card != null && card.Account == account ? card.Hover : 0;
+            card = AgentCard.Place(a.Name, anchor, geo.W, geo.H, ChatsOf(a.Name), tracking, CardOpenText(a));
+            card.Hover = hover;
+        }
+
+        /// <summary>Opens the card of the worker of an account (the chats and what each does). For tests and screenshots too.</summary>
+        public void OpenCard(string account)
+        {
+            Npc n = crowd == null ? null : crowd.Find(account);
+            if (n == null) return;
+            PlaceCard(account, FloorNpc.Hit(n, geo, layout));
+            Compose();
+            Invalidate();
+        }
+
+        public void CloseCard()
+        {
+            if (card == null) return;
+            card = null;
+            Cursor = Cursors.Default;
+            Compose();
+            Invalidate();
+        }
+
+        public bool CardOpen { get { return card != null; } }
+
+        /// <summary>The worker under a mouse position (workers of accounts only), the one in front first; null when there is none.</summary>
+        Npc WorkerAt(Point m)
+        {
+            if (editing || crowd == null || level != 0) return null;
+            Point l = Logical(m);
+            List<Npc> order = new List<Npc>(FloorNpc.InOrder(crowd.Npcs));
+            for (int i = order.Count - 1; i >= 0; i--)
+            {
+                Npc n = order[i];
+                if (n.Repairman || n.Helper || n.Level != 0 || crowd.IsHidden(n)) continue;
+                if (FloorNpc.Hit(n, geo, layout).Contains(l)) return n;
+            }
+            return null;
+        }
+
+        string WorkerTip(Npc n)
+        {
+            List<ChatState> list = ChatsOf(n.Account);
+            if (list.Count > 0) return n.Account + "  ·  " + Core.ChatStatus(list[0]) + (list.Count > 1 ? "  ·  " + Loc.T("{0} chats", list.Count) : "");
+            return n.Account + "  ·  " + (n.Presence == Presence.Busy ? Loc.T("Busy") : Loc.T("Ready"));
+        }
+
+        void ClickCard(Point at)
+        {
+            int b = card.ButtonAt(at);
+            if (b == 0) return;
+            string name = card.Account;
+            Account a = accounts.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            CloseCard();
+            if (b == 1 && a != null && Act != null) Act(a, StateOf(a) == CardState.NeedLogin ? "login" : "open");
+        }
+
         /// <summary>The finished picture at its own size (for tests and screenshots).</summary>
         public Bitmap Picture()
         {
@@ -323,6 +522,7 @@ namespace ClaudeTogether
             if (staticLayer != null) { staticLayer.Dispose(); staticLayer = null; }
             if (lights != null) { lights.Dispose(); lights = null; }
             crowd = null;
+            card = null;
             Compose();
             Invalidate();
         }
@@ -342,6 +542,7 @@ namespace ClaudeTogether
         void Compose()
         {
             if (!frozen && clockMs == 0) { clockNow = DateTime.Now; clockMs = watch.ElapsedMilliseconds; }
+            if (level == 1) { ComposeUpper(); return; }
             if (staticLayer == null) staticLayer = rot == 0 ? FloorArt.RenderStatic(layout, office) : FloorArt.RenderStaticTurned(layout, office, rot);
             double hour = Daylight.Hour(clockNow);
             int step = (int)(hour * 4.0);                 // the light is made again every quarter of an hour
@@ -368,24 +569,168 @@ namespace ClaudeTogether
                         DrawDeskAt(p, layout.Slots[i], i);
                     }
                     FloorArt.RedrawInFront(p, layout);
+                    if (!editing && crowd != null) FloorNpc.DrawGround(p, crowd, clockMs);
                     if (!editing && crowd != null)
                     {
                         FloorNpc.Stroke stroke = StrokeOf();
-                        foreach (Npc n in FloorNpc.InOrder(crowd.Npcs)) if (!crowd.IsHidden(n)) FloorNpc.Draw(p, n, clockMs, n == crowd.Shooter ? stroke : null);
+                        foreach (Npc n in FloorNpc.InOrder(crowd.Npcs)) if (n.Level == 0 && !crowd.IsHidden(n)) FloorNpc.Draw(p, n, clockMs, n == crowd.Shooter ? stroke : null);
                     }
                     if (editing) DrawEditing(p);
                 }
+                if (!editing && crowd != null)
+                    foreach (Npc n in crowd.Npcs)
+                        if (n.Level == level && !n.Repairman && !n.Helper && !crowd.IsHidden(n) && Waiting(n.Account)) FloorNpc.Bubble(p, n, geo, level == 1 ? upper : layout, clockMs);
                 g.DrawImageUnscaled(lights.Base, 0, 0);                       // the light is over the office; the interface is over the light
                 DrawFaded(g, lights.ToiletOff, lights.Toilet, 1.0 - toiletFade);
                 DrawFaded(g, lights.ToiletOn, lights.Toilet, toiletFade);
+                DrawFade(p);
                 List<HudButton> buttons = HudButtons();
                 FloorHud.Draw(p, hud, buttons, hudHover, clockMs, geo);
                 FloorHud.DrawButtons(p, buttons, hudHover);
                 if (editing && panel != null) panel.Draw(p);
+                if (card != null)
+                {
+                    Account ca = accounts.FirstOrDefault(x => x.Name.Equals(card.Account, StringComparison.OrdinalIgnoreCase));
+                    if (ca != null) card.Draw(p, ca, ChatsOf(ca.Name), tracking, chatsAt, CardOpenText(ca), clockMs);
+                }
                 if (menu != null) DrawMenu(p);
             }
             if (composite != null) composite.Dispose();
             composite = bmp;
+        }
+
+        /// <summary>The floor above: its fixed picture, the moving parts (windows, clocks, doors), the light, the header.</summary>
+        void ComposeUpper()
+        {
+            if (upperStatic == null) upperStatic = FloorArt.RenderStatic(upper, office);
+            double hour = Daylight.Hour(clockNow);
+            int step = (int)(hour * 4.0);
+            if (upperLights == null || step != upperLightStep)
+            {
+                if (upperLights != null) upperLights.Dispose();
+                upperLights = FloorArt.RenderLights(upper, hour);
+                upperLightStep = step;
+            }
+            Bitmap bmp = new Bitmap(geo.W, geo.H, PixelFormat.Format32bppPArgb);
+            using (Graphics g = Graphics.FromImage(bmp))
+            using (Px p = new Px(g))
+            {
+                g.DrawImageUnscaled(upperStatic, 0, 0);
+                FloorAnim.Draw(p, upper, Frame(upperSwings, false));
+                if (crowd != null)
+                {
+                    foreach (Npc n in FloorNpc.InOrder(crowd.Npcs)) if (n.Level == 1 && !crowd.IsHidden(n)) FloorNpc.Draw(p, n, clockMs, null);
+                    FloorArt.RedrawMeetingChairs(p, upper);
+                    foreach (Npc n in crowd.Npcs)
+                        if (n.Level == 1 && !n.Helper && !crowd.IsHidden(n) && Waiting(n.Account)) FloorNpc.Bubble(p, n, geo, upper, clockMs);
+                }
+                g.DrawImageUnscaled(upperLights.Base, 0, 0);
+                DrawFade(p);
+                List<HudButton> buttons = HudButtons();
+                FloorHud.Draw(p, hud, buttons, hudHover, clockMs, geo);
+                FloorHud.DrawButtons(p, buttons, hudHover);
+                if (menu != null) DrawMenu(p);
+            }
+            if (composite != null) composite.Dispose();
+            composite = bmp;
+        }
+
+        // ---------- bins ----------
+
+        readonly List<long> binClicks = new List<long>();
+
+        /// <summary>A bin pressed six times within six seconds spills its rubbish on the floor.</summary>
+        void CountBinClick(string key)
+        {
+            long now = frozen ? clockMs : watch.ElapsedMilliseconds;
+            binClicks.RemoveAll(t => now - t > 6000);
+            binClicks.Add(now);
+            if (binClicks.Count < 6 || crowd == null) return;
+            binClicks.Clear();
+            string[] xy = key.Substring(4).Split(',');
+            int bx, by;
+            if (xy.Length == 2 && int.TryParse(xy[0], out bx) && int.TryParse(xy[1], out by)) crowd.SpillLitter(bx, by);
+        }
+
+        // ---------- the elevator ----------
+
+        /// <summary>The place of the elevator door in the picture (the usual view only: it hangs on the back wall).</summary>
+        static Rectangle ElevatorRect()
+        {
+            TileRect e = FloorPlan.ElevatorWall;
+            return new Rectangle(FloorArt.X(e.X), FloorArt.Y(e.Y), e.W * 16, 16);
+        }
+
+        bool ElevatorAt(Point m)
+        {
+            if (editing || rot != 0 || fadePhase != 0 || menu != null) return false;
+            return ElevatorRect().Contains(Logical(m));
+        }
+
+        /// <summary>Takes the elevator to the other floor: the picture goes dark, the floor changes, the picture comes back.</summary>
+        public void UseElevator()
+        {
+            if (editing || fadePhase != 0) return;
+            fadeTarget = 1 - level;
+            fadePhase = 1;
+            fadeT = 0;
+            CloseCardQuietly();
+        }
+
+        void CloseCardQuietly() { card = null; menu = null; menuHover = -1; }
+
+        void StepFade(double seconds)
+        {
+            if (fadePhase == 0) return;
+            fadeT += seconds / FadeSeconds;
+            if (fadeT < 1.0) return;
+            if (fadePhase == 1)
+            {
+                SwitchFloor(fadeTarget);
+                fadePhase = 2;
+                fadeT = 0;
+            }
+            else fadePhase = 0;
+        }
+
+        /// <summary>The fade as 0 (clear) to 1 (black).</summary>
+        double FadeAmount { get { return fadePhase == 1 ? Math.Min(1.0, fadeT) : fadePhase == 2 ? Math.Max(0.0, 1.0 - fadeT) : 0.0; } }
+
+        void SwitchFloor(int to)
+        {
+            if (to == level) return;
+            if (to == 1)
+            {
+                rotBeforeStairs = rot;
+                if (rot != 0) SetRotation(0);
+                level = 1;
+            }
+            else
+            {
+                level = 0;
+                if (rotBeforeStairs != 0) SetRotation(rotBeforeStairs);
+            }
+            hover = -1;
+            hudHover = null;
+            Cursor = Cursors.Default;
+            Compose();
+            Invalidate();
+        }
+
+        /// <summary>Puts the floor at once, without the fade (for tests and screenshots).</summary>
+        public void SetFloor(int to)
+        {
+            fadePhase = 0;
+            SwitchFloor(to);
+        }
+
+        /// <summary>Darkens the building while the elevator moves; the header stays.</summary>
+        void DrawFade(Px p)
+        {
+            double a = FadeAmount;
+            if (a <= 0.0) return;
+            Rectangle r = rot == 0 ? FloorArt.Building() : geo.Rect(0, 0, FloorPlan.Cols * 16, FloorPlan.Rows * 16);
+            p.RA(r.X, r.Y, r.Width, r.Height, 0x000000, (int)Math.Round(255 * Math.Min(1.0, a)));
         }
 
         /// <summary>
@@ -416,6 +761,7 @@ namespace ClaudeTogether
                 FloorNpc.Stroke stroke = StrokeOfTurned();
                 foreach (Npc n in crowd.Npcs)
                 {
+                    if (n.Level != 0) continue;
                     if (crowd.IsHidden(n)) continue;
                     Npc worker = n;
                     FloorNpc.Stroke st = n == crowd.Shooter ? stroke : null;
@@ -642,6 +988,12 @@ namespace ClaudeTogether
                 return;
             }
             mouseLogical = Logical(e.Location);
+            if (card != null)
+            {
+                int cb = card.Box.Contains(mouseLogical.Value) ? card.ButtonAt(mouseLogical.Value) : 0;
+                if (cb != card.Hover) { card.Hover = cb; Compose(); Invalidate(); }
+                if (card.Box.Contains(mouseLogical.Value)) { Cursor = cb != 0 ? Cursors.Hand : Cursors.Default; return; }
+            }
             string hb = FloorHud.ButtonAt(HudButtons(), mouseLogical.Value);
             if (hb != hudHover) { hudHover = hb; Cursor = hb != null ? Cursors.Hand : Cursors.Default; Compose(); Invalidate(); }
             string buttonTip = hb == "rotate" ? Loc.T("Turn the office (R)") : "";
@@ -650,8 +1002,25 @@ namespace ClaudeTogether
                 if (buttonTip != tipText) { tipText = buttonTip; tip.SetToolTip(this, buttonTip); }
                 if (hb != null) return;
             }
-            int h = DeskAt(e.Location);
-            string thing = rot != 0 ? null : FloorAnim.KeyAt(layout, Tile(mouseLogical.Value.X, FloorArt.Ox), Tile(mouseLogical.Value.Y, FloorArt.Oy));
+            if (ElevatorAt(e.Location))
+            {
+                Cursor = Cursors.Hand;
+                string et = level == 0 ? Loc.T("Go upstairs") : Loc.T("Go downstairs");
+                if (et != tipText) { tipText = et; tip.SetToolTip(this, et); }
+                return;
+            }
+            if (tipText == Loc.T("Go upstairs") || tipText == Loc.T("Go downstairs")) { tipText = ""; tip.SetToolTip(this, ""); }
+            Npc under = WorkerAt(e.Location);
+            if (under != null)
+            {
+                Cursor = Cursors.Hand;
+                string wt = WorkerTip(under);
+                if (wt != tipText) { tipText = wt; tip.SetToolTip(this, wt); }
+                if (hover != -1) { hover = -1; Compose(); Invalidate(); }
+                return;
+            }
+            int h = level == 0 ? DeskAt(e.Location) : -1;
+            string thing = rot != 0 ? null : FloorAnim.KeyAt(Shown, Tile(mouseLogical.Value.X, FloorArt.Ox), Tile(mouseLogical.Value.Y, FloorArt.Oy));
             Cursor = h >= 0 || thing != null ? Cursors.Hand : Cursors.Default;
             if (h == hover) return;
             hover = h;
@@ -690,17 +1059,30 @@ namespace ClaudeTogether
             base.OnMouseUp(e);
             if (menu != null) { ClickMenu(Logical(e.Location)); return; }
             if (editing) { if (e.Button == MouseButtons.Left && panel != null && panel.Contains(Logical(e.Location))) return; if (e.Button == MouseButtons.Left) FinishDrag(); return; }
+            if (card != null && e.Button == MouseButtons.Left)
+            {
+                if (card.Box.Contains(Logical(e.Location))) { ClickCard(Logical(e.Location)); return; }
+                Npc other = WorkerAt(e.Location);
+                if (other == null || other.Account != card.Account) { CloseCard(); if (other == null) return; }
+            }
             if (e.Button == MouseButtons.Left && hudHover != null && FloorHud.ButtonAt(HudButtons(), Logical(e.Location)) == hudHover)
             {
                 if (HudAction != null) HudAction(hudHover);
                 return;
             }
-            int h = DeskAt(e.Location);
+            if (e.Button == MouseButtons.Left && ElevatorAt(e.Location)) { UseElevator(); return; }
+            if (e.Button == MouseButtons.Left)
+            {
+                Npc w = WorkerAt(e.Location);
+                if (w != null) { OpenCard(w.Account); return; }
+            }
+            int h = level == 0 ? DeskAt(e.Location) : -1;
             if (h < 0)
             {
                 if (e.Button != MouseButtons.Left) return;
                 Point lp = Logical(e.Location);
-                string key = rot != 0 ? null : FloorAnim.KeyAt(layout, Tile(lp.X, FloorArt.Ox), Tile(lp.Y, FloorArt.Oy));
+                string key = rot != 0 ? null : FloorAnim.KeyAt(Shown, Tile(lp.X, FloorArt.Ox), Tile(lp.Y, FloorArt.Oy));
+                if (key != null && key.StartsWith("bin:")) CountBinClick(key);
                 if (key != null)       // a tap, the coffee machine, an arcade game: it runs for a while
                 {
                     active.Activate(key, frozen ? clockMs : watch.ElapsedMilliseconds, FloorAnim.Duration(key));
@@ -813,8 +1195,9 @@ namespace ClaudeTogether
 
         public void BeginEdit()
         {
-            if (editing) return;
+            if (editing || level != 0 || fadePhase != 0) return;
             editing = true;
+            card = null;
             rotBeforeEdit = rot;
             if (rot != 0) SetRotation(0);              // decorating happens in the usual view
             hover = -1;
@@ -1058,9 +1441,10 @@ namespace ClaudeTogether
         {
             base.OnKeyDown(e);
             if (menu != null) { if (e.KeyCode == Keys.Escape) CloseMenu(); return; }
+            if (card != null && e.KeyCode == Keys.Escape) { CloseCard(); return; }
             if (!editing)
             {
-                if (e.KeyCode == Keys.R) Turn(e.Shift ? -1 : 1);
+                if (e.KeyCode == Keys.R && level == 0) Turn(e.Shift ? -1 : 1);
                 return;
             }
             if (e.KeyCode == Keys.R) TurnSelected();
@@ -1100,6 +1484,8 @@ namespace ClaudeTogether
             {
                 if (staticLayer != null) staticLayer.Dispose();
                 if (lights != null) lights.Dispose();
+                if (upperStatic != null) upperStatic.Dispose();
+                if (upperLights != null) upperLights.Dispose();
                 if (composite != null) composite.Dispose();
                 if (dragStatic != null) dragStatic.Dispose();
                 anim.Dispose();

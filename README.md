@@ -2,7 +2,7 @@
 
 # Claude Together
 
-**Run several Claude accounts side by side on one Windows PC. Own window, own sign-in, shared settings.**
+**Run several Claude and ChatGPT accounts side by side on one Windows PC. Own window, own sign-in, shared settings.**
 
 🌐 **English** · [Türkçe](readme-locals/README.tr.md)
 
@@ -16,8 +16,8 @@
 </div>
 
 > **Intended use**
-> Claude Together is for **your own Claude accounts on your own computer**. Run several of them side by side, share common settings, and split or hand off your own work between them, by hand or with an AI agent you direct.
-> It is **not** for selling, renting or sharing accounts, or for giving other people access to your accounts. It has no network code except the automatic update check (see [Privacy](#privacy)), sends no data about you anywhere and has no remote access.
+> Claude Together is for **your own Claude and ChatGPT accounts on your own computer**. Run several of them side by side, share common settings, and split or hand off your own work between them, by hand or with an AI agent you direct.
+> It is **not** for selling, renting or sharing accounts, or for giving other people access to your accounts. It has no network code except the automatic update check and two optional features you can switch on (see [Privacy](#privacy)), sends no data about you anywhere and has no remote access.
 
 ## Why
 
@@ -32,6 +32,11 @@ Claude Together gives each account its own Claude Desktop window and its own sig
 - **A little worker for every open account.** It is at its desk and types while the account is busy, dozes off after a long time of work, and now and then takes a break in a sensible order: a meal (wash the hands, fridge, hob, oven, microwave or toaster, then eat at a table), a drink, the toilet (and wash the hands afterwards), a game of pool (they really aim for the pockets and walk round the table) or arcade, a rest on the sofa. A worker walks in through the front door only when its account opens and out when it closes. The toilet lights switch on when somebody is in, and now and then a cabin goes out of service until a repairman has been. The floor reads only local information: whether Claude Desktop runs and, where Claude Code keeps it, the status of its live sessions; nothing is sent anywhere.
 - **Decorate your office.** **Decorate** opens a panel to move the desks, add or remove furniture and change the floor and the wallpaper of the main office. Press **R** to turn a thing (a rug lies the other way, other things face the other way). Nothing can block the doors (2 x 2 tiles in front of the entrance, 2 x 4 in front of the other doors) or the way between the desks; your choices are saved on your computer.
 - **Turn the office.** The turn button next to the menu (or the **R** key, **Shift+R** the other way) turns the whole office a quarter turn clockwise: four views, two of them standing up with the header in a column beside the office. Furniture, desks and workers are drawn again from the new side (sides and backs, not just the front), the workers sit and walk the way they would be seen from there, and the window takes the shape of the picture. The view is remembered; decorating always uses the usual view.
+- **Claude and ChatGPT accounts.** **+** asks which agent the account is for. A Claude account gets its own Claude Desktop window; a ChatGPT account runs in [Codex](https://developers.openai.com/codex) in a terminal, with its own `CODEX_HOME` and its own sign-in (`claude-together add work-gpt --provider chatgpt`, then `login`). ChatGPT accounts share their sessions, skills and prompts, so a chat started with one account can be resumed with the other. Codex has to be installed first (`npm install -g @openai/codex`); Claude Together does not install anything.
+- **See what every chat is doing.** Click a worker: a card lists the chats of its account and what each one is doing right now (thinking, running a command, editing a file, waiting for you, idle), for how long, and how many helpers (sub-agents) it has. A worker whose chat waits for you shows a blinking **!**. This needs the hooks of the agents: switch on **Show what the agents are doing** in the menu (or run `claude-together hooks install`). That adds one command to the settings of your agents (a copy of each changed file is kept, your own settings and hooks stay, and **off** takes only ours out again); at every step of a chat the agent then writes a small file on your computer. Nothing is sent anywhere. For ChatGPT, open Codex once, type `/hooks` and trust the hook.
+- **Two floors.** An elevator next to the front door takes you to the floor above: a lobby, two meeting rooms with a screen and a table, a storage room with shelves and water jugs, a prayer room with prayer rugs and a niche, and a tea house with a tea counter and little tables, joined by a corridor. Click the elevator and the picture fades out and back in on the other floor. The floor above is shown in the usual view (the turn and decorate buttons are not there).
+- **A busy building.** Workers on the same work (and the sub-agents of a chat) meet in a meeting room: one presents at the screen, the others sit round the table and now and then spin on their chairs. Workers stand at the tea counter for a glass of tea, ring up on the wall phone for a meal that a courier brings to the front door (then they eat in the kitchen and wash their hands), and queue for the toilets, going red in the face when they wait too long (the door handles are green when a cabin is free and red when it is taken). A cleaner sits in the tea house, picks up rubbish, mops (sometimes with a wet-floor sign; a worker who walks on a wet floor may slip) and changes the water jugs, which run empty after five uses; a robot wanders about and spins round on a wet floor. Press a bin often enough and it spills.
+- **Weather and prayer times (optional, off by default).** Switch them on in the menu, under **Online (optional)**: the windows then show the real weather at your place (clouds, rain, snow, fog, storms), and at each prayer time the workers go to the prayer room and pray. See [Privacy](#privacy) for exactly what is sent.
 - **One click per account**, or **Run all**, from a small dark GUI. Add accounts with **+**.
 - **Guided first-time setup**: Back up → Distribute → Run → Ready. Nothing is deleted.
 - **Shared by default**: settings, `CLAUDE.md`, skills, plugins, commands, agents, hooks, history. Sign-in stays per account.
@@ -165,11 +170,14 @@ Good to know:
 ## How it works
 
 ```
+%USERPROFILE%\AGENT_BASE\CLAUDE_BASE\<account>\    Claude Code home of a new account (links into the shared folder)
+%USERPROFILE%\AGENT_BASE\CHATGPT_BASE\<account>\   Codex home of a ChatGPT account (CODEX_HOME)
+%USERPROFILE%\AGENT_BASE\CHATGPT_BASE\shared\      what the ChatGPT accounts share: sessions, skills, prompts, AGENTS.md
 %USERPROFILE%\.claude-shared\            shared: projects, skills, plugins, settings.json, CLAUDE.md, ...
-%USERPROFILE%\.claude-<account>\         one Claude Code config folder per account (links into the shared folder)
+%USERPROFILE%\.claude-<account>\         Claude Code home of an account made by an earlier version (kept where it is)
 %APPDATA%\Claude\                        Claude Desktop data of the primary account (the normal window)
 %APPDATA%\Claude-<account>\              Claude Desktop data of every other account
-%APPDATA%\claude-together\               this app: profiles.json, app.log
+%APPDATA%\claude-together\               this app: profiles.json, app.log, activity\ (what the chats do)
 ```
 
 - **Separate windows.** Claude Desktop is an Electron app. A second window with its own sign-in is started with `--user-data-dir`, and every account's Claude Code uses its own `CLAUDE_CONFIG_DIR`.
@@ -200,7 +208,7 @@ If you use macOS or Linux and want to help, please try it and open an issue with
 
 ## Privacy
 
-Everything stays on your computer. There is no network code except the automatic update check: one request to the list of releases of this project on GitHub when the window opens (you can switch it off in the settings menu, then no request is made; setting `CLAUDE_TOGETHER_NO_UPDATE_CHECK=1` does the same for scripts), and the download of a release when you choose **Update now**. The request carries the version of the program in its User-Agent, as GitHub asks, and nothing else: no account names, no folders, no identifier. Your choice and a skipped version are kept in `%APPDATA%\claude-together\settings.json`. Apart from that, `delegate` only starts the local `claude` program, which talks to Anthropic the way it always does. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`).
+Everything stays on your computer. There is no network code except the automatic update check: one request to the list of releases of this project on GitHub when the window opens (you can switch it off in the settings menu, then no request is made; setting `CLAUDE_TOGETHER_NO_UPDATE_CHECK=1` does the same for scripts), and the download of a release when you choose **Update now**. The request carries the version of the program in its User-Agent, as GitHub asks, and nothing else: no account names, no folders, no identifier. Your choice and a skipped version are kept in `%APPDATA%\claude-together\settings.json`. Apart from that, `delegate` only starts the local `claude` program, which talks to Anthropic the way it always does. It reads and writes the folders listed above and writes a local log, `%APPDATA%\claude-together\app.log`. To start Claude Desktop it looks up the install folder with a local PowerShell query (`Get-AppxPackage`). If you switch on **Weather in the windows** or **Pray at the prayer times** (both off by default), the program asks for your city once (the name is sent to open-meteo.com to find its coordinates; only the coordinates, rounded to about a kilometre, are kept). The weather is then one request to open-meteo.com every half hour, and the prayer times one request to aladhan.com per day (coordinates and the date); nothing else is in them, and no account, folder or chat. `CLAUDE_TOGETHER_NO_ONLINE=1` switches both off for good. If you switch on **Show what the agents are doing**, the agents run `claude-together hook` at each step of a chat, which writes one small file per chat to `%APPDATA%\claude-together\activity` (state, the command or file in use, the first words of your prompt as the chat's name); the program reads those files to draw the cards. They are never sent anywhere.
 
 ## Build
 

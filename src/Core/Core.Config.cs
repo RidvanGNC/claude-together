@@ -80,7 +80,9 @@ namespace ClaudeTogether
                         if (name.Length == 0) continue;
                         string mode = Str(d, "desktop");
                         bool primary = mode == Account.PrimaryMode || mode == "normal";
-                        c.Accounts.Add(new Account { Name = name, Desktop = primary ? Account.PrimaryMode : Account.SecondaryMode });
+                        string provider = Providers.Parse(Str(d, "provider")) ?? Providers.Claude;
+                        string desktop = provider != Providers.Claude ? Account.NoDesktop : (primary ? Account.PrimaryMode : Account.SecondaryMode);
+                        c.Accounts.Add(new Account { Name = name, Desktop = desktop, Provider = provider, Dir = Str(d, "dir") });
                     }
                 }
                 object stage;
@@ -100,6 +102,8 @@ namespace ClaudeTogether
                 Dictionary<string, object> d = new Dictionary<string, object>();
                 d["name"] = a.Name;
                 d["desktop"] = a.Desktop;
+                if (!a.IsClaude) d["provider"] = a.Provider;
+                if (!string.IsNullOrEmpty(a.Dir)) d["dir"] = a.Dir;
                 accounts.Add(d);
             }
             Dictionary<string, object> root = new Dictionary<string, object>();

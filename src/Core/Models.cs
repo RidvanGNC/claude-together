@@ -4,16 +4,25 @@ using System.Collections.Generic;
 
 namespace ClaudeTogether
 {
-    /// <summary>One Claude account. The primary account uses the normal Claude Desktop data folder.</summary>
+    /// <summary>
+    /// One account of one agent. Claude accounts also have a Claude Desktop window; the primary one uses the normal Claude Desktop data
+    /// folder. ChatGPT (Codex) accounts have a Codex home folder only.
+    /// </summary>
     class Account
     {
         public const string PrimaryMode = "primary";
         public const string SecondaryMode = "secondary";
+        public const string NoDesktop = "none";
 
         public string Name;
         public string Desktop;
+        /// <summary>"claude" (the default for old config files) or "chatgpt".</summary>
+        public string Provider = Providers.Claude;
+        /// <summary>The home folder of the agent for this account. Empty: the older place, %USERPROFILE%\.claude-&lt;name&gt;.</summary>
+        public string Dir = "";
 
         public bool Primary { get { return Desktop == PrimaryMode; } }
+        public bool IsClaude { get { return Provider == Providers.Claude; } }
     }
 
     class Config
@@ -47,6 +56,7 @@ namespace ClaudeTogether
     class ScanEntry
     {
         public string Name;
+        public string Provider = Providers.Claude;
         public bool Registered;
         public bool Primary;
         public string ConfigDir;

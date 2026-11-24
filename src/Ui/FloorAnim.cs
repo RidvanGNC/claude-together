@@ -19,6 +19,10 @@ namespace ClaudeTogether
         public Func<int, bool> CabinBroken;   // is the cabin whose door is on this tile column out of service
         public Func<Prop, double> ChairPull;   // how far a kitchen chair is pulled out from its table (0 pushed in, 1 pulled out)
         public int CuesLeft = 3;        // cues still in the rack on the wall
+        public bool LiftOpen;           // somebody is getting in or out of the elevator on this floor
+        public Sky Sky;                 // the weather outside (from the optional online feature; clear when it is off)
+        public Func<string, bool> CoolerEmpty;   // the jug of the water cooler with this key is empty
+        public Func<int, bool> CabinBusy;        // somebody is in the toilet cabin whose door is on this tile column (or on the way there)
     }
 
     /// <summary>
@@ -46,6 +50,7 @@ namespace ClaudeTogether
         {
             if (key.StartsWith("sink") || key == "ksink") return 4500;
             if (key == "coffee") return 8000;
+            if (key.StartsWith("bin:")) return 1100;
             if (key == "fridge") return 3000;
             if (key == "toaster") return 5000;
             if (key == "oven") return 9000;
@@ -75,6 +80,7 @@ namespace ClaudeTogether
                     case PropKind.Cooler: return "cooler:" + pr.X + "," + pr.Y;
                     case PropKind.Arcade: return "arcade:" + pr.Variant;
                     case PropKind.Vending: return "vending";
+                    case PropKind.Bin: return "bin:" + pr.X + "," + pr.Y;
                 }
             }
             return null;
@@ -88,6 +94,8 @@ namespace ClaudeTogether
                 switch (pr.Kind)
                 {
                     case PropKind.Window: Glass(p, pr, px, py, f); break;
+                    case PropKind.Bin: BinLid(p, px, py, "bin:" + pr.X + "," + pr.Y, f); break;
+                    case PropKind.Elevator: if (f.LiftOpen) FloorArt.ElevatorOpen(p, px, py); break;
                     case PropKind.Clock: Clock(p, px, py, f); break;
                     case PropKind.Arcade: Arcade(p, pr.Variant, px, py, f); break;
                     case PropKind.NeonSign: Neon(p, px, py, pr.W * 16, f); break;
@@ -115,6 +123,50 @@ namespace ClaudeTogether
             for (int i = 0; i < l.Doors.Count && i < f.Doors.Length; i++) DoorAt(p, l, l.Doors[i], f.Doors[i].Progress, f);
         }
 
+        // ---------- the weather in the windows ----------
+
+        /// <summary>The colour of the sky and the street under the weather: greyer for clouds, much greyer for a storm, pale for fog and snow.</summary>
+        static int WeatherTint(int rgb, AnimFrame f)
+        {
+            double light = Math.Max(0.3, f.Level);
+            switch (f.Sky)
+            {
+                case Sky.Cloudy: return Outdoor.Mix(rgb, Dim(0x9AA3AE, light), 0.45);
+                case Sky.Fog: return Outdoor.Mix(rgb, Dim(0xDDE3E8, light), 0.65);
+                case Sky.Rain: return Outdoor.Mix(rgb, Dim(0x7C8794, light), 0.55);
+                case Sky.Snow: return Outdoor.Mix(rgb, Dim(0xDCE4EC, light), 0.5);
+                case Sky.Storm: return Outdoor.Mix(rgb, Dim(0x4A5260, light), 0.65);
+            }
+            return rgb;
+        }
+
+        /// <summary>Rain streaks, snowflakes and the flash of lightning, over the glass of a window.</summary>
+        static void WeatherParticles(Px p, int x0, int y0, int w, int h, AnimFrame f)
+        {
+            if (f.Sky == Sky.Rain || f.Sky == Sky.Storm)
+            {
+                for (int i = 0; i < w / 3; i++)
+                {
+                    int x = x0 + Hash(i, 7) % w;
+                    int ph = (int)((f.Ms / 45 + Hash(i, 3) % (h + 3)) % (h + 3));
+                    int y = y0 + ph - 2;
+                    if (y < y0 || y >= y0 + h) continue;
+                    p.RA(x - ph / 7, y, 1, 2, 0xBFD6EE, 170);
+                }
+                if (f.Sky == Sky.Storm && (f.Epoch / 1000) % 9 == 0 && f.Epoch % 1000 < 120) p.RA(x0, y0, w, h, 0xFFFFFF, 150);
+            }
+            else if (f.Sky == Sky.Snow)
+            {
+                for (int i = 0; i < w / 4; i++)
+                {
+                    int sway = (int)Math.Round(Math.Sin(f.Ms / 700.0 + i) * 1.5);
+                    int x = x0 + (Hash(i, 11) % w) + sway;
+                    int y = y0 + (int)((f.Ms / 150 + Hash(i, 5) % h) % h);
+                    if (x >= x0 && x < x0 + w) p.P(x, y, 0xFFFFFF);
+                }
+            }
+        }
+
         // ---------- windows and the street ----------
 
         static int Dim(int rgb, double level) { return Outdoor.Dim(rgb, level); }
@@ -124,7 +176,7 @@ namespace ClaudeTogether
             int w = pr.W * 16, gx0 = px + 3, gy0 = py + 2, gw = w - 6;
             int frame = pr.Variant == 0 ? 0x6A4A2B : 0xE8E4DC;
             for (int gx = 0; gx < gw; gx++)
-                for (int gy = 0; gy < Outdoor.Rows; gy++) p.P(gx0 + gx, gy0 + gy, Outdoor.Pixel(gx0 + gx, gy, f.Level, f.Warmth));
+                for (int gy = 0; gy < Outdoor.Rows; gy++) p.P(gx0 + gx, gy0 + gy, WeatherTint(Outdoor.Pixel(gx0 + gx, gy, f.Level, f.Warmth), f));
             // cars and people live on the one street strip; the glass only shows the part in front of it
             p.G.SetClip(new Rectangle(gx0, gy0, gw, Outdoor.Rows));
             foreach (Mover m in f.Traffic)
@@ -132,6 +184,7 @@ namespace ClaudeTogether
                 if (m.Kind == MoverKind.Car) Car(p, m, gy0, f.Level); else Person(p, m, gy0, f.Level);
             }
             p.G.ResetClip();
+            WeatherParticles(p, gx0, gy0, gw, Outdoor.Rows, f);
             p.R(px + w / 2 - 1, py + 2, 1, 11, frame);
             p.RA(px + 5, py + 3, 1, 4, 0xFFFFFF, 90);
             p.RA(px + 6, py + 4, 1, 3, 0xFFFFFF, 60);
@@ -141,7 +194,7 @@ namespace ClaudeTogether
         static void Street(Px p, int x0, int y0, int w, int h, AnimFrame f)
         {
             for (int gx = 0; gx < w; gx++)
-                for (int gy = 0; gy < h; gy++) p.P(x0 + gx, y0 + gy, Outdoor.Pixel(x0 + gx, Math.Min(Outdoor.Rows - 1, gy), f.Level, f.Warmth));
+                for (int gy = 0; gy < h; gy++) p.P(x0 + gx, y0 + gy, WeatherTint(Outdoor.Pixel(x0 + gx, Math.Min(Outdoor.Rows - 1, gy), f.Level, f.Warmth), f));
             p.G.SetClip(new Rectangle(x0, y0, w, h));
             foreach (Mover m in f.Traffic)
             {
@@ -230,6 +283,25 @@ namespace ClaudeTogether
                 }
                 if (open < 0.2) { p.R(x + w / 2 - 3, y + 8, 2, 3, 0xE0C060); p.R(x + w / 2 + 1, y + 8, 2, 3, 0xE0C060); }
             }
+            else if (d.Kind == DoorKind.Room)
+            {
+                int w = d.Len * 16;                                           // a door in the wall face: two wooden leaves that slide apart
+                int leaf = (int)Math.Round((w / 2 - 2) * (1.0 - 0.85 * open));
+                p.R(x, y + 1, w, 15, 0x5A3B1F);
+                p.R(x + 1, y + 2, w - 2, 13, 0x2A2F3A);                       // what is beyond: dark
+                for (int i = 0; i < 2; i++)
+                {
+                    int lx = i == 0 ? x + 1 : x + w - 1 - leaf;
+                    p.R(lx, y + 2, leaf, 13, 0xA9794A);
+                    p.R(lx, y + 2, leaf, 1, 0xC79A66);
+                    if (leaf > 6)
+                    {
+                        p.R(lx + 2, y + 4, leaf - 4, 4, 0x8A5E34);
+                        p.R(lx + 2, y + 10, leaf - 4, 3, 0x8A5E34);
+                    }
+                }
+                if (open < 0.2) { p.R(x + w / 2 - 3, y + 8, 2, 3, 0xE0C060); p.R(x + w / 2 + 1, y + 8, 2, 3, 0xE0C060); }
+            }
             else if (d.Kind == DoorKind.Opening)
             {
                 int len = d.Len * 16, half = len / 2;
@@ -271,8 +343,15 @@ namespace ClaudeTogether
                 if (leaf > 6)
                 {
                     for (int i = 22; i < 28; i += 2) p.R(lx + 2, cy + i, leaf - 4, 1, 0x8A6542);
-                    p.R(lx + 1, cy + 26, 2, 2, 0xE0C060);
                 }
+            }
+            // the handle: green when the cabin is free, red when somebody is in it (or on the way)
+            if (d.Kind == DoorKind.Cabin && f.CabinBusy != null)
+            {
+                int cx2 = X(d.X - 1), cy2 = Y(d.Y - 2);
+                bool busy = f.CabinBusy(d.X);
+                p.R(cx2 + 19, cy2 + 25, 3, 4, 0x1B1B1B);
+                p.R(cx2 + 20, cy2 + 26, 1, 2, busy ? 0xE04444 : 0x58D07A);
             }
         }
 
@@ -503,8 +582,32 @@ namespace ClaudeTogether
             Steam(p, px + 6, py - 5, fr, 3, 1);
         }
 
+        /// <summary>A bin that was touched: the lid jumps up and rattles for a moment.</summary>
+        static void BinLid(Px p, int px, int py, string key, AnimFrame f)
+        {
+            if (!f.Active.IsOn(key, f.Ms)) return;
+            double age = f.Active.Age(key, f.Ms);
+            int w = age < 0.8 ? ((int)(age * 1000 / 70) % 2 == 0 ? -1 : 1) : 0;
+            p.E(px + 4, py + 7, 8, 3, 0x2A2F3A);                   // the dark gap under the lid
+            p.E(px + 3 + w, py + 1, 10, 7, 0x4F5662);              // the lid, lifted
+            p.E(px + 4 + w, py + 1, 8, 5, 0xA6AEB9);
+            p.E(px + 5 + w, py + 2, 6, 3, 0x939CA8);
+            p.R(px + 6 + w, py + 3, 4, 1, 0x555C66);
+            p.P(px + 5 + w, py + 2, 0xD3D9E0);
+        }
+
         static void Cooler(Px p, int px, int py, string key, AnimFrame f)
         {
+            if (f.CoolerEmpty != null && f.CoolerEmpty(key))        // the jug is empty: clear plastic, no water, until the cleaner has changed it
+            {
+                p.R(px + 4, py - 9, 8, 10, 0xE4ECF0);
+                p.R(px + 5, py - 10, 6, 1, 0xE4ECF0);
+                p.R(px + 4, py - 9, 1, 10, 0xFFFFFF); p.R(px + 11, py - 9, 1, 10, 0xB8C4CC);
+                p.R(px + 5, py - 4, 6, 1, 0xCAD6DE);
+                p.R(px + 6, py + 1, 4, 3, 0xCAD6DE);
+                p.R(px + 5, py + 3, 6, 1, 0x8A929C);
+                return;
+            }
             if (!f.Active.IsOn(key, f.Ms)) return;
             int fr = (int)(f.Ms / 100);
             for (int i = 0; i < 3; i++)

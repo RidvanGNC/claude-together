@@ -87,7 +87,7 @@ namespace ClaudeTogether
         public void ResetItems()
         {
             Items.Clear();
-            Add(PropKind.Clock, 0, 4, 0);
+            Add(PropKind.Clock, 0, 5, 0);          // not over the elevator (columns 3 and 4)
             Add(PropKind.Whiteboard, 0, 8, 0);
             Add(PropKind.Bookshelf, 0, 12, 1);
             Add(PropKind.Cooler, 0, 5, 1);
@@ -236,7 +236,8 @@ namespace ClaudeTogether
                         if (!Enum.TryParse<PropKind>(Str(d, "kind"), out kind)) continue;
                         DecorItem it = new DecorItem();
                         it.Kind = kind; it.Variant = Num(d, "variant", 0); it.X = Num(d, "x", 0); it.Y = Num(d, "y", 0); it.Rot = Num(d, "rot", 0) & 1;
-                        if (Decorating.Find(it.Kind, it.Variant) != null) read.Items.Add(it);
+                        DecorKind found = Decorating.Find(it.Kind, it.Variant);
+                        if (found != null && !Decorating.OnElevator(it, found)) read.Items.Add(it);
                     }
                 else read.Items = s.Items;
                 return read.Repaired();
@@ -278,6 +279,17 @@ namespace ClaudeTogether
             new DecorKind("Whiteboard", PropKind.Whiteboard, 0, 2, 1, false, true),
             new DecorKind("Picture", PropKind.Poster, 1, 2, 1, false, true),
         };
+
+        /// <summary>
+        /// True when an item sits where the elevator (added to the building later) hangs or where people stand to call it. Saved offices
+        /// from before the elevator may have something there; it is left out when the office is read.
+        /// </summary>
+        public static bool OnElevator(DecorItem it, DecorKind k)
+        {
+            TileRect r = new TileRect(it.X, it.Y, k.Wid(it.Rot), k.Hei(it.Rot));
+            if (k.OnWall) return r.Overlaps(FloorPlan.ElevatorWall) || r.Overlaps(FloorPlan.PhoneWall);
+            return k.Blocks && (r.Overlaps(FloorPlan.ElevatorFront) || r.Overlaps(FloorPlan.PhoneFront));
+        }
 
         public static DecorKind Find(PropKind kind, int variant)
         {

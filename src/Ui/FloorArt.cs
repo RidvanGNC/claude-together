@@ -113,6 +113,9 @@ namespace ClaudeTogether
                     for (int yy = 0; yy < h; yy += 2)
                         for (int xx = (yy / 2 % 2) * 2; xx < w; xx += 4) p.P(x0 + xx, y0 + yy, 0x57426F);
                     break;
+                default:
+                    UpperFloor(p, kind, x0, y0, w, h);
+                    break;
             }
         }
 
@@ -162,6 +165,7 @@ namespace ClaudeTogether
         {
             Room room = l.RoomAt(b.X, b.Y);
             int x0 = X(b.X), y0 = Y(b.Y), w = b.W * 16;
+            if (UpperWall(p, room.Kind, x0, y0, w)) { p.R(x0, y0 + 15, w, 1, 0x3A2E26); return; }
             switch (room.Kind)
             {
                 case RoomKind.Office:
@@ -571,6 +575,9 @@ namespace ClaudeTogether
                     p.R(mx + 1, py + 2, 12, 10, 0xAFC8D4);
                     p.R(mx + 2, py + 3, 2, 5, 0xDDEBF1);
                     break;
+                default:
+                    UpperProp(p, pr, px, py, w, h);
+                    break;
             }
         }
 
@@ -768,6 +775,7 @@ namespace ClaudeTogether
 
         static void Rug(Px p, Prop pr, int px, int py, int w, int h)
         {
+            if (UpperRug(p, pr.Variant, px, py, w, h)) return;
             if (pr.Variant == 0)
             {
                 p.R(px + 2, py + 2, w - 4, h - 4, 0x6B4A3A);
@@ -1162,6 +1170,25 @@ namespace ClaudeTogether
         static Emitter Lamp(float x, float y, float rx, float ry, float strength, int rgb) { return new Emitter(x, y, rx, ry, strength, rgb); }
         static Emitter ToiletLamp(float x, float y, float rx, float ry, float strength, int rgb) { Emitter e = new Emitter(x, y, rx, ry, strength, rgb); e.Toilet = true; return e; }
 
+        /// <summary>The lights of the floor above: ceiling lamps in the lobby and the corridor, over the meeting tables and the tea tables, cool tubes in the storage room.</summary>
+        static void UpperEmitters(List<Emitter> em)
+        {
+            em.Add(Lamp(X(3), Y(3), 56, 40, 0.50f, 0xFFEBC8));                    // lobby
+            em.Add(Lamp(X(4), Y(1), 24, 16, 0.40f, 0xCFE8FF));                    // the elevator's own light
+            foreach (int tx in new[] { 4, 12, 20, 27 }) em.Add(Lamp(X(tx), Y(7) + 8, 46, 22, 0.45f, 0xFFEBC8));    // corridor
+            foreach (int mx in new[] { 10, 18 })                                  // meeting rooms: over the table, and the glow of the screen
+            {
+                em.Add(Lamp(X(mx), Y(3), 62, 36, 0.55f, 0xF4F1E8));
+                em.Add(Lamp(X(mx), Y(1), 40, 14, 0.45f, 0xBFD8FF));
+            }
+            em.Add(Lamp(X(25), Y(2), 58, 20, 0.50f, 0xEAF4FF));                   // storage: cool tubes
+            em.Add(Lamp(X(25), Y(4), 58, 16, 0.40f, 0xEAF4FF));
+            em.Add(Lamp(X(5), Y(13), 72, 44, 0.50f, 0xFFF0C0));                   // prayer room: soft and warm
+            em.Add(Lamp(X(7), Y(9) + 8, 22, 12, 0.50f, 0xFFE9A8));                // the lamp in the niche
+            em.Add(Lamp(X(19), Y(10), 52, 18, 0.50f, 0xFFD890));                  // tea house: over the counter
+            foreach (int tx in new[] { 15, 19, 23, 27 }) em.Add(Lamp(X(tx), Y(13), 46, 28, 0.50f, 0xFFDDA0));
+        }
+
         /// <summary>The toilets (cabins and hall) in picture pixels: the part of the picture whose light is switched.</summary>
         public static Rectangle ToiletArea() { return new Rectangle(X(18), Y(5), 12 * 16, Y(10) - Y(5)); }
 
@@ -1208,6 +1235,16 @@ namespace ClaudeTogether
 
         public static LightSet RenderLights(Layout l, double hour)
         {
+            if (l.Level == 1)           // the floor above has no toilets whose light is switched
+            {
+                Bitmap all = Layer(l, hour, true);
+                LightSet up = new LightSet();
+                up.Toilet = new Rectangle(0, 0, 1, 1);
+                up.ToiletOn = all.Clone(up.Toilet, all.PixelFormat);
+                up.ToiletOff = all.Clone(up.Toilet, all.PixelFormat);
+                up.Base = all;
+                return up;
+            }
             Bitmap on = Layer(l, hour, true), off = Layer(l, hour, false);
             LightSet set = new LightSet();
             set.Toilet = ToiletArea();
@@ -1234,10 +1271,15 @@ namespace ClaudeTogether
         {
             double level = Daylight.Level(hour), warmth = Daylight.Warmth(hour), side = Daylight.Side(hour), night = 1.0 - level;
             List<Emitter> em = new List<Emitter>();
+            bool upper = l.Level == 1;
+            if (upper) UpperEmitters(em);
+            else
+            {
             // office: wide, soft ceiling light over each row of desks, a lamp at the door
             foreach (int row in new[] { 7, 13 })
                 foreach (int tx in new[] { 3, 9, 15 }) em.Add(Lamp(X(tx), Y(row) - 8, 56, 40, 0.50f, 0xFFEBC8));
             em.Add(Lamp(X(2), Y(2), 30, 22, 0.45f, 0xFFE2B0));
+            em.Add(Lamp(X(4), Y(1), 24, 16, 0.40f, 0xCFE8FF));          // the elevator's own light
             foreach (Prop pr in l.Props)                // floor lamps the player put in the office
                 if (pr.Kind == PropKind.Lamp) em.Add(Lamp(X(pr.X) + 8, Y(pr.Y) - 2, 48, 34, 0.60f, 0xFFD890));
             // kitchen: light under the wall cabinets, a hanging lamp over each small table
@@ -1253,6 +1295,7 @@ namespace ClaudeTogether
             em.Add(Lamp(X(20) + 8, Y(10) + 16, 44, 16, 0.50f, 0xFF4FA3));
             em.Add(Lamp(X(23) + 8, Y(11) + 2, 22, 16, 0.50f, 0xFFD08A));
             em.Add(Lamp(X(28) + 8, Y(12), 18, 14, 0.45f, 0xCFE8FF));
+            }
 
             foreach (Emitter e in em) e.Strength = Math.Min(0.95f, e.Strength * (1f + 0.35f * (float)night));   // lamps count for more in the dark
             int navy = Outdoor.Mix(0x0A1030, 0x050820, night);
@@ -1263,9 +1306,17 @@ namespace ClaudeTogether
             float lift = (float)(0.85 * level + 0.22 * night);
             int lean = (int)Math.Round(10.0 - side * 50.0);
             List<int[]> beams = new List<int[]>();       // left, right, top, bottom, lean
-            foreach (int wx in new[] { 6, 10, 14 }) beams.Add(new[] { X(wx) + 3, X(wx) + 29, Y(1), Y(7), lean });
-            beams.Add(new[] { X(26) + 3, X(26) + 29, Y(1), Y(4), lean / 2 });
-            Rectangle toilet = ToiletArea();
+            if (upper)
+            {
+                foreach (Prop wp in l.Props)
+                    if (wp.Kind == PropKind.Window) beams.Add(new[] { X(wp.X) + 3, X(wp.X) + wp.W * 16 - 3, Y(wp.Y + 1), Y(wp.Y + 5), lean / 2 });
+            }
+            else
+            {
+                foreach (int wx in new[] { 6, 10, 14 }) beams.Add(new[] { X(wx) + 3, X(wx) + 29, Y(1), Y(7), lean });
+                beams.Add(new[] { X(26) + 3, X(26) + 29, Y(1), Y(4), lean / 2 });
+            }
+            Rectangle toilet = upper ? Rectangle.Empty : ToiletArea();
             Rectangle building = Building();
             int[] bayer = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
             float shade = (float)(58.0 + 54.0 * night);   // strength of the blue shade away from lights (0 to 255)

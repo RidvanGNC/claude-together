@@ -50,20 +50,38 @@ namespace ClaudeTogether
             foreach (Account a in cfg.Accounts)
             {
                 seen.Add(a.Name);
-                list.Add(Describe(a.Name, a, true));
+                list.Add(Describe(a.Name, a, true, a.Provider, HomeDir(a)));
             }
 
-            SortedSet<string> found = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             Regex ok = new Regex("^[A-Za-z0-9_-]{1,24}$");
+            // Folders of an older layout: %USERPROFILE%\.claude-<name> (Claude Code) and Claude-<name> (Claude Desktop).
+            SortedSet<string> found = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
             AddNames(found, Paths.Home, ".claude-", ok);
             AddNames(found, Paths.Roaming, "Claude-", ok);
             foreach (string name in found)
             {
-                if (seen.Contains(name) || name.Equals("shared", StringComparison.OrdinalIgnoreCase) || name.Equals("profiles", StringComparison.OrdinalIgnoreCase)) continue;
-                ScanEntry e = Describe(name, null, false);
-                if (e.ConfigDirExists || e.DesktopSignedIn) list.Add(e);
+                if (seen.Contains(name) || IsReserved(name)) continue;
+                ScanEntry e = Describe(name, null, false, Providers.Claude, Paths.ProfileDir(name));
+                if (e.ConfigDirExists || e.DesktopSignedIn) { list.Add(e); seen.Add(name); }
+            }
+            // The homes made in AGENT_BASE.
+            foreach (string provider in Providers.All)
+            {
+                SortedSet<string> homes = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                AddNames(homes, Providers.Base(provider), "", ok);
+                foreach (string name in homes)
+                {
+                    if (seen.Contains(name) || IsReserved(name)) continue;
+                    list.Add(Describe(name, null, false, provider, Providers.NewHome(provider, name)));
+                    seen.Add(name);
+                }
             }
             return list;
+        }
+
+        static bool IsReserved(string name)
+        {
+            return name.Equals("shared", StringComparison.OrdinalIgnoreCase) || name.Equals("profiles", StringComparison.OrdinalIgnoreCase);
         }
 
         static void AddNames(ISet<string> into, string parent, string prefix, Regex ok)
@@ -79,17 +97,26 @@ namespace ClaudeTogether
             catch (Exception) { }
         }
 
-        static ScanEntry Describe(string name, Account a, bool registered)
+        static ScanEntry Describe(string name, Account a, bool registered, string provider, string home)
         {
             ScanEntry e = new ScanEntry();
             e.Name = name;
             e.Registered = registered;
+            e.Provider = provider;
             e.Primary = a != null && a.Primary;
-            e.ConfigDir = Paths.ProfileDir(name);
+            e.ConfigDir = home;
             e.ConfigDirExists = Directory.Exists(e.ConfigDir);
-            e.CodeSignedIn = e.ConfigDirExists && CodeSignedIn(e.ConfigDir);
-            e.DesktopDir = a != null ? Paths.DataDir(a) : Path.Combine(Paths.Roaming, "Claude-" + name);
-            e.DesktopSignedIn = File.Exists(Path.Combine(e.DesktopDir, "Local State"));
+            e.CodeSignedIn = e.ConfigDirExists && Providers.SignedIn(provider, e.ConfigDir);
+            if (provider == Providers.Claude)
+            {
+                e.DesktopDir = a != null ? Paths.DataDir(a) : Path.Combine(Paths.Roaming, "Claude-" + name);
+                e.DesktopSignedIn = File.Exists(Path.Combine(e.DesktopDir, "Local State"));
+            }
+            else
+            {
+                e.DesktopDir = "";
+                e.DesktopSignedIn = false;
+            }
             return e;
         }
 
@@ -106,12 +133,13 @@ namespace ClaudeTogether
                 Account byName = Find(cfg, named);
                 if (byName != null) { source = "env"; return byName; }
             }
-            string dir = (Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") ?? "").Trim();
-            if (dir.Length > 0)
+            foreach (string provider in Providers.All)
             {
+                string dir = (Environment.GetEnvironmentVariable(Providers.HomeVar(provider)) ?? "").Trim();
+                if (dir.Length == 0) continue;
                 string want = Norm(dir);
                 foreach (Account a in cfg.Accounts)
-                    if (Norm(Paths.ProfileDir(a.Name)).Equals(want, StringComparison.OrdinalIgnoreCase)) { source = "configDir"; return a; }
+                    if (a.Provider == provider && Norm(HomeDir(a)).Equals(want, StringComparison.OrdinalIgnoreCase)) { source = "configDir"; return a; }
             }
             return null;
         }
@@ -181,7 +209,8 @@ namespace ClaudeTogether
             if (CurrentDepth() >= MaxDelegateDepth)
                 throw new InvalidOperationException(Loc.T("A delegated session cannot delegate again."));
             if (string.IsNullOrWhiteSpace(r.Prompt)) throw new InvalidOperationException(Loc.T("The prompt is empty."));
-            string profile = Paths.ProfileDir(r.Target.Name);
+            if (!r.Target.IsClaude) throw new InvalidOperationException(Loc.T("Handing work to a {0} account is not available yet.", Providers.Title(r.Target.Provider)));
+            string profile = HomeDir(r.Target);
             if (!Directory.Exists(profile) || !CodeSignedIn(profile))
                 throw new SignInNeededException(Loc.T("{0} has no Claude Code sign-in yet. Run: claude-together run {0}, then use /login inside Claude.", r.Target.Name));
             string workDir = string.IsNullOrEmpty(r.WorkDir) ? Directory.GetCurrentDirectory() : r.WorkDir;
@@ -246,7 +275,8 @@ namespace ClaudeTogether
             string stamp = Stamp();
             foreach (Account a in cfg.Accounts)
             {
-                string profile = Paths.ProfileDir(a.Name);
+                if (!a.IsClaude) continue;
+                string profile = HomeDir(a);
                 if (Directory.Exists(profile)) LinkShared(profile, "skills", true, stamp, log);
             }
             return file;

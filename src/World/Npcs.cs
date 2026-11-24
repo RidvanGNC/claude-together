@@ -12,12 +12,14 @@ namespace ClaudeTogether
 
     enum Facing { Down, Up, Left, Right }
 
-    enum Pose { Stand, Sit, Work, Pool, Play, Wash }
+    enum Pose { Stand, Sit, Work, Pool, Play, Wash, Tea, Present, Pray, Phone }
 
     /// <summary>A place where a worker can stay for a while: at a desk, at the coffee machine, at a washbasin, on the sofa.</summary>
     sealed class Spot
     {
-        public string Group;            // desk, kitchen, table, basin, cabin, arcade, pool, sofa, vending, rack
+        public int Level;               // the floor: 0 the office, 1 the floor above
+        public int Room = -1;           // for a seat or a place to present: which meeting room (0 or 1)
+        public string Group;            // desk, kitchen, table, basin, cabin, arcade, pool, sofa, vending, rack, lift, tea, stool, pray, seat, present, phone, pickup, queue
         public string Id;               // what the place is: desk, ksink, hbasin, fridge, stove, oven, micro, toaster, cooler, coffee, vending, table, cabin, arcade, pool, sofa, rack
         public int Tx, Ty;              // the tile to walk to
         public double Fx, Fy;           // where the feet end up (in tiles)
@@ -64,6 +66,11 @@ namespace ClaudeTogether
                 if (pr.Kind == PropKind.CueRack)       // hangs on the wall: a worker takes a cue from it and puts it back
                 {
                     list.Add(Make("rack", "rack", pr.X, pr.Y + 1, pr.X + 0.5, pr.Y + 1.45, Facing.Up, Pose.Stand, null, 1.4, 1.6));
+                    continue;
+                }
+                if (pr.Kind == PropKind.Phone)           // hangs on the wall: a worker rings up to order a meal
+                {
+                    list.Add(Make("phone", "phone", pr.X, pr.Y + 1, pr.X + 0.5, pr.Y + 1.45, Facing.Up, Pose.Phone, "phone", 8, 12));
                     continue;
                 }
                 if (pr.OnWall) continue;
@@ -153,6 +160,32 @@ namespace ClaudeTogether
         public bool HasCue;             // carries a pool cue taken from the rack on the wall
         public int ShotsLeft;           // strokes this player still wants to take before leaving the table
         public bool Dozing;             // fell asleep at the desk after a long time of work
+        public int Level;               // the floor the worker is on
+        public bool Riding;             // in the elevator (out of sight)
+        public double RideLeft;         // seconds until the elevator arrives
+        public Spot Trip;               // where the worker is really going when it walks to the elevator first
+        public double LiftDoorLeft;     // seconds the elevator door stays open for this worker
+        public bool Helper;             // a sub-agent of the account: comes to meetings with it, belongs to no desk
+        public string Parent;           // for a helper: the account it helps
+        public bool RemoveOnArrival;    // a helper that is back at its parent's desk is gone
+        public Meeting Meeting;         // the meeting the worker is in
+        public bool Praying;            // on the way to pray, praying, or on the way back
+        public int PrayedFor;           // the call to prayer this worker has answered
+        public double SpinLeft;         // spinning on its chair for this many more seconds
+        public bool FaceScreen;         // for the presenter: turned to the screen (not to the others)
+        public bool Cleaner;            // the cleaner: belongs to no account and no desk
+        public bool Mopping;            // the cleaner is mopping as she walks
+        public bool Picking;            // the cleaner is bending down (picking something up, lifting a jug)
+        public int Carry;               // the cleaner carries a jug: 1 a full one, 2 an empty one
+        public double SlipLeft;         // fallen on a wet floor: for this many more seconds
+        public int WetX, WetY;          // the wet tile this worker last stepped on (so that it slips at most once per tile)
+        public bool Courier;            // brings the meal that was ordered by phone
+        public bool HasBox;             // the courier still has the meal
+        public bool Delivery;           // has ordered a meal: goes to the door, then eats it
+        public bool HasFood;            // carries the meal
+        public bool Queueing;           // waits in the hall for a toilet cabin
+        public double QueuedFor;        // seconds spent in that line
+        public double Blush;            // 0 to 1: red in the face from waiting too long
         public List<string> Plan = new List<string>();     // the places of the current errand still to visit (ids of Spot.Id), the desk last
 
         internal List<double[]> Way;
@@ -171,7 +204,7 @@ namespace ClaudeTogether
     /// account has closed. Sometimes a cabin goes out of service and a repairman comes. Everything is decided with a seeded random
     /// generator, so a test can replay a day.
     /// </summary>
-    sealed class Crowd
+    sealed partial class Crowd
     {
         public const double Speed = 2.2;       // tiles per second
         public const double LeaveDelay = 10.0; // seconds an account must stay closed before its worker walks out
@@ -201,15 +234,21 @@ namespace ClaudeTogether
         bool planned;
         PoolGame.Stage lastStage = PoolGame.Stage.Waiting;
 
-        public Crowd(Layout l, int seed)
+        public Crowd(Layout l, int seed) : this(l, null, seed) { }
+
+        /// <summary>The workers of a building with two floors: <paramref name="upper"/> is the floor above (or null: only the office).</summary>
+        public Crowd(Layout l, Layout upper, int seed)
         {
             layout = l;
+            rngSeedForStaff = seed * 13 + 1;
+            InitFloors(upper);
             rng = new Random(seed);
             errands = Spots.Errands(l);
             desks = new Spot[l.Slots.Count];
             for (int i = 0; i < desks.Length; i++) desks[i] = Spots.DeskSpot(l.Slots[i]);
             foreach (Door d in l.Doors) if (d.Kind == DoorKind.Main) { entrance = d; break; }
             foreach (Spot s in errands) if (s.Group == "rack") { rack = s; break; }
+            AddPickupSpots();
             Pool = new PoolGame(seed * 31 + 7);
             foreach (Prop pr in l.Props) if (pr.Kind == PropKind.Billiard) { TableX = pr.X * 16.0; TableY = pr.Y * 16.0; break; }
         }
@@ -230,7 +269,8 @@ namespace ClaudeTogether
         /// <summary>True while somebody is out of sight in a cabin.</summary>
         public bool IsHidden(Npc n)
         {
-            Room r = layout.RoomAt((int)Math.Floor(n.X), (int)Math.Floor(n.Y));
+            if (n.Riding) return true;
+            Room r = LayoutOf(n.Level).RoomAt((int)Math.Floor(n.X), (int)Math.Floor(n.Y));
             return r != null && r.Hidden;
         }
 
@@ -239,6 +279,7 @@ namespace ClaudeTogether
         {
             foreach (Npc n in Npcs)
             {
+                if (n.Level != 0 || n.Riding) continue;
                 int tx = (int)Math.Floor(n.X), ty = (int)Math.Floor(n.Y);
                 if (tx >= 18 && ty >= 5 && ty < 10) return true;
             }
@@ -249,10 +290,14 @@ namespace ClaudeTogether
         /// True when somebody is within the given distance (in tiles) of a point (in tiles). Somebody sitting in a closed
         /// cabin does not count: the door of the cabin shuts behind them.
         /// </summary>
-        public bool Near(double x, double y, double reach)
+        public bool Near(double x, double y, double reach) { return Near(0, x, y, reach); }
+
+        /// <summary>The same for a floor (0 the office, 1 the floor above).</summary>
+        public bool Near(int level, double x, double y, double reach)
         {
             foreach (Npc n in Npcs)
             {
+                if (n.Level != level || n.Riding) continue;
                 if (!n.Walking && IsHidden(n)) continue;
                 double dx = n.X - x, dy = n.Y - y;
                 if (dx * dx + dy * dy < reach * reach) return true;
@@ -295,10 +340,16 @@ namespace ClaudeTogether
                 if (n.Leaving) { n.Leaving = false; n.Goal = null; n.Way = null; n.Wait = 0; }
             }
             foreach (Npc n in Npcs.ToArray())
-                if (!n.Repairman && !presence.ContainsKey(n.Account) && !n.Leaving) Leave(n);
+                if (!n.Repairman && !n.Helper && !n.Cleaner && !n.Courier && !presence.ContainsKey(n.Account) && !n.Leaving) Leave(n);
+            StepFloors(seconds, presence, deskOf);
+            StepStaff(seconds);
+            StepOrders(seconds);
             foreach (Npc n in Npcs.ToArray())
             {
                 if (n.Repairman) StepRepairman(n, seconds, use);
+                else if (n.Helper) StepHelper(n, seconds, use);
+                else if (n.Cleaner) StepCleaner(n, seconds, use);
+                else if (n.Courier) StepCourier(n, seconds, use);
                 else Step(n, seconds, deskOf, use);
             }
             PoolTurn(seconds);
@@ -384,6 +435,8 @@ namespace ClaudeTogether
             n.Presence = Presence.Away;
             n.Plan.Clear();
             n.Dozing = false;
+            DropFromMeeting(n);
+            n.Praying = false; n.Trip = null; n.SpinLeft = 0; n.Delivery = false; n.HasFood = false; n.Queueing = false;
             Spot door = new Spot();
             door.Group = "door"; door.Id = "door";
             door.Tx = entrance != null ? entrance.X : 1;
@@ -393,7 +446,7 @@ namespace ClaudeTogether
             if (!GoTo(n, door)) Remove(n);
         }
 
-        void Remove(Npc n) { Release(n); Npcs.Remove(n); byName.Remove(n.Account); }
+        void Remove(Npc n) { DropFromMeeting(n); Release(n); Npcs.Remove(n); byName.Remove(n.Account); }
 
         /// <summary>
         /// Somebody gets up from where they were: a kitchen chair is pushed back under the table (most of the time) or left out; a
@@ -416,21 +469,32 @@ namespace ClaudeTogether
         bool GoTo(Npc n, Spot spot)
         {
             Release(n);
+            // another floor: walk to the elevator first; the ride and the walk on the other floor follow (see BeginRide)
+            Spot target = spot;
+            if (spot.Level != n.Level && !(spot.Group == "lift"))
+            {
+                Spot lift = LiftOn(n.Level);
+                if (lift == null) return false;
+                n.Trip = spot;
+                spot = lift;
+            }
+            else n.Trip = null;
+            Layout lay = LayoutOf(n.Level);
             int sx = (int)Math.Floor(n.X), sy = (int)Math.Floor(n.Y);
             bool prefix = false;
-            if (!layout.Walkable(sx, sy))
+            if (!lay.Walkable(sx, sy))
             {
                 // sitting on something that is not floor (the sofa): step out in front of it, like getting up
-                if (n.At != null && layout.Walkable(n.At.Tx, n.At.Ty)) { sx = n.At.Tx; sy = n.At.Ty; prefix = true; }
+                if (n.At != null && lay.Walkable(n.At.Tx, n.At.Ty)) { sx = n.At.Tx; sy = n.At.Ty; prefix = true; }
                 else
                 {
-                    if (entrance == null) return false;
+                    if (entrance == null || n.Level != 0) return false;
                     n.X = entrance.X + 0.5; n.Y = entrance.Y + 0.3;
                     sx = entrance.X; sy = entrance.Y;
                 }
             }
-            List<int[]> tiles = layout.Path(sx, sy, spot.Tx, spot.Ty);
-            if (tiles == null) return false;
+            List<int[]> tiles = lay.Path(sx, sy, spot.Tx, spot.Ty);
+            if (tiles == null) { n.Trip = null; return false; }
             List<double[]> way = new List<double[]>();
             if (prefix) way.Add(new[] { sx + 0.5, sy + 0.5 });
             foreach (int[] t in tiles) way.Add(new[] { t[0] + 0.5, t[1] + 0.5 });
@@ -438,7 +502,7 @@ namespace ClaudeTogether
             if (spot.Chair) spot.PullTarget = 1.0;                  // the chair is pulled out as the worker comes to it
             n.Way = way;
             n.WayIndex = 0;
-            n.Goal = spot;
+            n.Goal = n.Trip != null ? target : spot;
             n.At = null;
             n.Walking = true;
             n.WorkedFor = 0;
@@ -449,14 +513,19 @@ namespace ClaudeTogether
 
         void Step(Npc n, double seconds, Dictionary<string, int> deskOf, Action<string> use)
         {
+            if (n.LiftDoorLeft > 0) n.LiftDoorLeft -= seconds;
+            if (n.Riding) { Ride(n, seconds); return; }
             if (n.Way != null) { Walk(n, seconds, use); return; }
             if (n.Leaving) { Remove(n); return; }
+            if (n.Meeting != null) { StepMeeting(n, seconds); return; }
+            if (!n.Queueing && n.Blush > 0) n.Blush = Math.Max(0.0, n.Blush - 0.15 * seconds);
+            if (n.Queueing && !n.Walking && StepQueue(n, seconds)) return;
             int desk;
             Spot mine = deskOf.TryGetValue(n.Account, out desk) && desk >= 0 && desk < desks.Length ? desks[desk] : null;
             if (mine == null) return;
             bool atDesk = n.Goal == mine;
             // a busy account sends its worker back to the desk, unless it is out of sight in a cabin
-            if (n.Presence == Presence.Busy && !atDesk && !(n.Goal != null && n.Goal.Inside))
+            if (n.Presence == Presence.Busy && !atDesk && !n.Praying && !n.Delivery && !(n.Goal != null && n.Goal.Inside))
             {
                 n.Plan.Clear();
                 if (n.HasCue && rack != null && n.Goal == rack) n.HasCue = false;         // just took a cue: never mind
@@ -479,7 +548,7 @@ namespace ClaudeTogether
             }
             n.Wait -= seconds;
             if (n.Wait > 0) return;
-            if (n.Presence == Presence.Busy) { n.Wait = Between(mine.Min, mine.Max); return; }
+            if (n.Presence == Presence.Busy && !n.Praying && !n.Delivery) { n.Wait = Between(mine.Min, mine.Max); return; }
             if (n.Plan.Count == 0)
             {
                 if (!atDesk) { if (!GoTo(n, mine)) n.Wait = 2; return; }
@@ -489,7 +558,12 @@ namespace ClaudeTogether
             string id = n.Plan[0];
             n.Plan.RemoveAt(0);
             Spot next = Resolve(n, id, mine);
-            if (next == null) { n.Wait = 0; return; }                                      // not possible now: the next step
+            if (next == null)
+            {
+                if (id == "cabin" && TryQueue(n)) { n.Plan.Insert(0, "cabin"); return; }          // every cabin is taken: wait in the hall
+                n.Wait = 0;
+                return;                                                                       // not possible now: the next step
+            }
             // a cue comes from the rack on the wall before a game, and goes back there afterwards
             if (next.Group == "pool" && !n.HasCue && rack != null) { n.Plan.Insert(0, id); next = rack; }
             else if (n.HasCue && rack != null && next != rack && next.Group != "pool") { n.Plan.Insert(0, id); next = rack; }
@@ -524,8 +598,10 @@ namespace ClaudeTogether
         List<string> BuildPlan(Npc n)
         {
             List<string> p = new List<string>();
-            double[] w = { 4.0, 2.0, 1.2, 1.5, 1.5, 0.8, 1.0, 0.4 };       // stay, meal, snack, water, toilet, vending, game, sofa
-            double roll = rng.NextDouble() * (4.0 + 2.0 + 1.2 + 1.5 + 1.5 + 0.8 + 1.0 + 0.4);
+            double[] w = { 4.0, 2.0, 1.2, 1.5, 1.5, 0.8, 1.0, 0.4, upperErrands != null ? 1.6 : 0.0, upperErrands != null ? 0.9 : 0.0 };       // stay, meal, snack, water, toilet, vending, game, sofa, tea upstairs, ring up for a meal
+            double total = 0;
+            foreach (double x in w) total += x;
+            double roll = rng.NextDouble() * total;
             int kind = 0;
             for (int i = 0; i < w.Length; i++) { roll -= w[i]; if (roll <= 0) { kind = i; break; } }
             switch (kind)
@@ -557,6 +633,11 @@ namespace ClaudeTogether
                     if (rng.NextDouble() < 0.4) p.Add("table");
                     break;
                 case 6: p.Add(rng.NextDouble() < 0.6 ? "pool" : "arcade"); break;
+                case 9: p.Add("phone"); break;           // ring up; the meal comes to the door later (see Crowd.Orders)
+                case 8:                                  // a glass of tea in the tea house, standing at the counter, and maybe a seat
+                    p.Add("tea");
+                    if (rng.NextDouble() < 0.5) p.Add("stool");
+                    break;
                 default: p.Add("sofa"); break;
             }
             p.Add("desk");
@@ -573,6 +654,12 @@ namespace ClaudeTogether
                 if (s.Id != id || s.Broken || Taken(s, n)) continue;
                 free.Add(s);
             }
+            if (upperErrands != null)
+                foreach (Spot s in upperErrands)
+                {
+                    if (s.Id != id || Taken(s, n)) continue;
+                    free.Add(s);
+                }
             if (free.Count == 0) return null;
             return free[rng.Next(free.Count)];
         }
@@ -718,7 +805,9 @@ namespace ClaudeTogether
 
         void Walk(Npc n, double seconds, Action<string> use)
         {
+            if (n.SlipLeft > 0) { n.SlipLeft -= seconds; return; }              // lying on the floor after a slip
             double left = Speed * seconds;
+            if (n.Mopping) left *= 0.55;
             while (left > 0 && n.Way != null)
             {
                 double[] to = n.Way[n.WayIndex];
@@ -732,6 +821,9 @@ namespace ClaudeTogether
                 if (d > 0.001) { n.X += dx / d * move; n.Y += dy / d * move; }
                 n.Walked += move;
                 left -= move;
+                if (n.Mopping) MarkWet((int)Math.Floor(n.X), (int)Math.Floor(n.Y));
+                else CheckSlip(n);
+                if (n.SlipLeft > 0) break;
                 if (move < d) break;
                 n.WayIndex++;
                 if (n.WayIndex >= n.Way.Count) { Arrived(n, use); break; }
@@ -744,13 +836,17 @@ namespace ClaudeTogether
             n.Walking = false;
             Spot g = n.Goal;
             if (n.Leaving) return;           // removed on the next step
+            if (n.Trip != null) { BeginRide(n); return; }          // at the elevator: the ride comes first
             if (g.Group == "rack") n.HasCue = !n.HasCue;      // takes a cue, or puts it back
+            if (!n.Cleaner && !n.Helper && !n.Repairman) CountJugUse(g);
+            if (g.Group == "phone" && !n.Courier) ScheduleOrder(n);
             if (g.Group == "pool" && !g.Dynamic && n.ShotsLeft <= 0) n.ShotsLeft = 3 + rng.Next(4);
             n.At = g;
             n.Pose = g.Pose;
             n.Face = g.Face;
             n.Wait = n.Repairman ? Between(12, 18) : Between(g.Min, g.Max);
-            if (g.Desk >= 0) n.WorkedFor = 0;
+            if (g.Desk >= 0) { n.WorkedFor = 0; n.Praying = false; n.Delivery = false; n.HasFood = false; if (n.RemoveOnArrival) { Remove(n); return; } }
+            if (g.Group == "table") n.HasFood = false;                  // sat down to eat it
             if (g.Key != null && use != null) use(g.Key);
             if (Visited != null) Visited(n, g);
         }

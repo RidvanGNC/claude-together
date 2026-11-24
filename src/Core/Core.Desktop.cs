@@ -14,8 +14,10 @@ namespace ClaudeTogether
     {
         static List<string> exeCache;
 
+        /// <summary>Ready to open: Claude Desktop has a sign-in in its data folder; a ChatGPT account has its Codex sign-in.</summary>
         public static bool Ready(Account a)
         {
+            if (!a.IsClaude) return AgentSignedIn(a);
             return File.Exists(Path.Combine(Paths.DataDir(a), "Local State"));
         }
 
@@ -48,6 +50,7 @@ namespace ClaudeTogether
 
         public static bool IsRunning(Account a, List<Proc> procs)
         {
+            if (!a.IsClaude) return false;       // there is no window to find; what a ChatGPT account does comes from its hooks
             string dir = Paths.DataDir(a);
             foreach (Proc p in procs)
             {
@@ -62,7 +65,7 @@ namespace ClaudeTogether
         {
             Dictionary<string, bool> result = new Dictionary<string, bool>();
             List<Proc> procs = DesktopProcs();
-            foreach (Account a in cfg.Accounts) result[a.Name] = IsRunning(a, procs);
+            foreach (Account a in cfg.Accounts) result[a.Name] = a.IsClaude ? IsRunning(a, procs) : Chats(a.Name, DateTime.UtcNow).Count > 0;
             return result;
         }
 
@@ -138,7 +141,7 @@ namespace ClaudeTogether
             // Claude started without Claude Together uses ~/.claude: make sure that folder shares the store too.
             try { EnsureDefaultShared(Log); }
             catch (Exception ex) { Log("Could not link the default folder: " + ex.Message); }
-            Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", Paths.ProfileDir(a.Name));
+            Environment.SetEnvironmentVariable("CLAUDE_CONFIG_DIR", HomeDir(a));
             foreach (string exe in Exes())
             {
                 try

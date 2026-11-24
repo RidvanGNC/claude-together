@@ -125,9 +125,90 @@ namespace ClaudeTogether
         }
     }
 
+    /// <summary>Modal dialog with a message and a row of choices (and Cancel).</summary>
+    class ChoiceForm : Form
+    {
+        public int Choice = -1;
+
+        public ChoiceForm(string title, string text, string[] choices)
+        {
+            Text = title;
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            StartPosition = FormStartPosition.CenterParent;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            ShowInTaskbar = false;
+            BackColor = Theme.Surface;
+            Font = Theme.F(10f, false);
+            KeyPreview = true;
+
+            int w = Theme.S(480), pad = Theme.S(28), inner = w - 2 * pad;
+            int y = pad;
+            Label t = new Label();
+            t.Text = title;
+            t.Font = Theme.F(14f, true);
+            t.ForeColor = Theme.Text;
+            t.BackColor = Theme.Surface;
+            t.AutoSize = false;
+            t.SetBounds(pad, y, inner, Theme.S(30));
+            Controls.Add(t);
+            y += Theme.S(36);
+            Size ms = TextRenderer.MeasureText(text, Theme.F(10.5f, false), new Size(inner, 0), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            Label b = new Label();
+            b.Text = text;
+            b.Font = Theme.F(10.5f, false);
+            b.ForeColor = Theme.Muted;
+            b.BackColor = Theme.Surface;
+            b.AutoSize = false;
+            b.SetBounds(pad, y, inner, ms.Height + Theme.S(4));
+            Controls.Add(b);
+            y += b.Height + Theme.S(22);
+
+            int bh = Theme.S(42), gap = Theme.S(10);
+            RoundBtn cancel = new RoundBtn();
+            cancel.Kind = BtnKind.Secondary;
+            cancel.Text = Loc.T("Cancel");
+            cancel.BackColor = Theme.Surface;
+            int cw = Math.Max(Theme.S(96), TextRenderer.MeasureText(cancel.Text, cancel.Font).Width + Theme.S(40));
+            int x = w - pad - cw;
+            cancel.SetBounds(x, y, cw, bh);
+            cancel.Click += delegate { Choice = -1; DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cancel);
+            for (int i = choices.Length - 1; i >= 0; i--)
+            {
+                int index = i;
+                RoundBtn rb = new RoundBtn();
+                rb.Kind = i == 0 ? BtnKind.Primary : BtnKind.Secondary;
+                rb.Text = choices[i];
+                rb.BackColor = Theme.Surface;
+                int rw = Math.Max(Theme.S(110), TextRenderer.MeasureText(choices[i], rb.Font).Width + Theme.S(40));
+                x -= gap + rw;
+                rb.SetBounds(x, y, rw, bh);
+                rb.Click += delegate { Choice = index; DialogResult = DialogResult.OK; Close(); };
+                Controls.Add(rb);
+            }
+            y += bh + pad;
+            ClientSize = new Size(w, y);
+        }
+
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); UiWin.DarkTitle(Handle); }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == Keys.Escape) { Choice = -1; DialogResult = DialogResult.Cancel; Close(); return true; }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+    }
+
     /// <summary>Helpers that show DlgForm.</summary>
     static class Dlg
     {
+        /// <summary>Asks for one of several choices. Returns its number, or -1 when the dialog was cancelled.</summary>
+        public static int Choose(IWin32Window owner, string title, string text, params string[] choices)
+        {
+            using (ChoiceForm f = new ChoiceForm(title, text, choices)) { f.ShowDialog(owner); return f.Choice; }
+        }
+
         public static bool Ask(IWin32Window owner, string title, string text, string yes, string no)
         {
             using (DlgForm f = new DlgForm(title, text, yes, no, null, null, null)) { f.ShowDialog(owner); return f.Result; }
